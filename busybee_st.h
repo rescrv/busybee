@@ -40,7 +40,6 @@
 #include <e/buffer.h>
 #include <e/lockfree_fifo.h>
 #include <e/lockfree_hash_map.h>
-#include <e/striped_lock.h>
 
 // BusyBee
 #include <busybee_returncode.h>
@@ -48,7 +47,7 @@
 class busybee_st
 {
     public:
-        busybee_st(const po6::net::ipaddr& ip);
+        busybee_st();
         ~busybee_st() throw ();
 
     public:
@@ -97,7 +96,6 @@ class busybee_st
 
     private:
         po6::io::fd m_epoll;
-        e::striped_lock<po6::threads::mutex> m_connectlocks;
         e::lockfree_hash_map<po6::net::location, std::pair<int, uint32_t>, po6::net::location::hash> m_locations;
         e::lockfree_fifo<message> m_incoming;
         std::vector<std::tr1::shared_ptr<channel> > m_channels;
