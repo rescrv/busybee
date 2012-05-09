@@ -3,6 +3,10 @@ autom4te.cache/
 autoscan.log
 busybee-bench-mta
 busybee-bench-mta.o
+busybee-bench-st
+busybee-bench-sta
+busybee-bench-sta.o
+busybee-bench-st.o
 config.guess
 config.h
 config.h.in
