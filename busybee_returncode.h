@@ -28,15 +28,47 @@
 #ifndef busybee_returncode_h_
 #define busybee_returncode_h_
 
+// C++
+#include <iostream>
+
+// busybee_returncode occupies [4608, 4864)
 enum busybee_returncode
 {
-    BUSYBEE_SHUTDOWN    = 0,
-    BUSYBEE_SUCCESS     = 1,
-    BUSYBEE_QUEUED      = 2,
-    BUSYBEE_POLLFAILED  = 3,
-    BUSYBEE_DISCONNECT  = 4,
-    BUSYBEE_CONNECTFAIL = 5,
-    BUSYBEE_ADDFDFAILED = 6
+    BUSYBEE_SUCCESS     = 4608,
+    BUSYBEE_SHUTDOWN    = 4609,
+    BUSYBEE_QUEUED      = 4610,
+    BUSYBEE_POLLFAILED  = 4611,
+    BUSYBEE_DISCONNECT  = 4612,
+    BUSYBEE_CONNECTFAIL = 4613,
+    BUSYBEE_ADDFDFAIL   = 4614
 };
+
+#define str(x) #x
+#define xstr(x) str(x)
+#define stringify(x) case (x): lhs << xstr(x); break
+
+inline std::ostream&
+operator << (std::ostream& lhs, busybee_returncode rhs)
+{
+    switch (rhs)
+    {
+        stringify(BUSYBEE_SUCCESS);
+        stringify(BUSYBEE_SHUTDOWN);
+        stringify(BUSYBEE_QUEUED);
+        stringify(BUSYBEE_POLLFAILED);
+        stringify(BUSYBEE_DISCONNECT);
+        stringify(BUSYBEE_CONNECTFAIL);
+        stringify(BUSYBEE_ADDFDFAIL);
+        default:
+            lhs << "unknown returncode";
+            break;
+    }
+
+    return lhs;
+}
+
+#undef stringify
+#undef xstr
+#undef str
 
 #endif // busybee_returncode_h_
