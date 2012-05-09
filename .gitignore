@@ -2,7 +2,6 @@ aclocal.m4
 autom4te.cache/
 autoscan.log
 busybee-bench-mta
-busybee-bench-mta.cc
 busybee-bench-mta.o
 config.guess
 config.h

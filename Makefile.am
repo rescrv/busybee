@@ -48,7 +48,13 @@ libbusybee_st_la_SOURCES = busybee.cc
 libbusybee_st_la_CPPFLAGS = -DBUSYBEE_ST
 libbusybee_st_la_LDFLAGS = -static
 
-noinst_PROGRAMS = busybee-bench-mta
+noinst_PROGRAMS = busybee-bench-mta busybee-bench-sta busybee-bench-st
 
 busybee_bench_mta_SOURCES = busybee-bench-mta.cc
 busybee_bench_mta_LDADD = libbusybee-mta.la -le -lrt
+
+busybee_bench_sta_SOURCES = busybee-bench-sta.cc
+busybee_bench_sta_LDADD = libbusybee-sta.la -le -lrt
+
+busybee_bench_st_SOURCES = busybee-bench-st.cc
+busybee_bench_st_LDADD = libbusybee-st.la -le -lrt
