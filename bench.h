@@ -45,7 +45,10 @@
 
 template <typename busybee>
 int
-benchmark(busybee* bb, po6::threads::mutex* io, const std::vector<po6::net::location>& others)
+benchmark(busybee* bb,
+          po6::threads::mutex* io,
+          const std::vector<po6::net::location>& others,
+          bool do_send, bool do_recv)
 {
     std::tr1::mt19937 rng;
     std::tr1::uniform_int<> dist(0, others.size() - 1);
@@ -72,32 +75,38 @@ benchmark(busybee* bb, po6::threads::mutex* io, const std::vector<po6::net::loca
         msg->resize(BUSYBEE_HEADER_SIZE + 1);
         busybee_returncode ret;
 
-        switch ((ret = bb->send(loc, msg)))
+        if (do_send)
         {
-            case BUSYBEE_SUCCESS:
-                break;
-            case BUSYBEE_SHUTDOWN:
-            case BUSYBEE_QUEUED:
-            case BUSYBEE_POLLFAILED:
-            case BUSYBEE_DISCONNECT:
-            case BUSYBEE_CONNECTFAIL:
-            case BUSYBEE_ADDFDFAILED:
-            default:
-                std::cerr << "send error:  " << (unsigned) ret << std::endl;
+            switch ((ret = bb->send(loc, msg)))
+            {
+                case BUSYBEE_SUCCESS:
+                case BUSYBEE_QUEUED:
+                    break;
+                case BUSYBEE_SHUTDOWN:
+                case BUSYBEE_POLLFAILED:
+                case BUSYBEE_DISCONNECT:
+                case BUSYBEE_CONNECTFAIL:
+                case BUSYBEE_ADDFDFAIL:
+                default:
+                    std::cerr << "send error:  " << ret << std::endl;
+            }
         }
 
-        switch (bb->recv(&loc, &msg))
+        if (do_recv)
         {
-            case BUSYBEE_SUCCESS:
-                break;
-            case BUSYBEE_SHUTDOWN:
-            case BUSYBEE_QUEUED:
-            case BUSYBEE_POLLFAILED:
-            case BUSYBEE_DISCONNECT:
-            case BUSYBEE_CONNECTFAIL:
-            case BUSYBEE_ADDFDFAILED:
-            default:
-                std::cerr << "send error:  " << (unsigned) ret << std::endl;
+            switch ((ret = bb->recv(&loc, &msg)))
+            {
+                case BUSYBEE_SUCCESS:
+                    break;
+                case BUSYBEE_SHUTDOWN:
+                case BUSYBEE_QUEUED:
+                case BUSYBEE_POLLFAILED:
+                case BUSYBEE_DISCONNECT:
+                case BUSYBEE_CONNECTFAIL:
+                case BUSYBEE_ADDFDFAIL:
+                default:
+                    std::cerr << "recv error:  " << ret << std::endl;
+            }
         }
 
         ++ops;
