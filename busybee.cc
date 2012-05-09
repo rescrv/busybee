@@ -276,7 +276,7 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
         case BUSYBEE_POLLFAILED:
         case BUSYBEE_DISCONNECT:
         case BUSYBEE_CONNECTFAIL:
-        case BUSYBEE_ADDFDFAILED:
+        case BUSYBEE_ADDFDFAIL:
         default:
             throw std::runtime_error("Could not create connection to self.");
     }
@@ -334,7 +334,7 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
         case BUSYBEE_POLLFAILED:
         case BUSYBEE_DISCONNECT:
         case BUSYBEE_CONNECTFAIL:
-        case BUSYBEE_ADDFDFAILED:
+        case BUSYBEE_ADDFDFAIL:
         default:
             throw std::runtime_error("Could not create connection to self.");
     }
@@ -351,6 +351,27 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
     }
 }
 #endif // sta
+
+#ifdef BUSYBEE_ST
+busybee_st :: busybee_st()
+    : m_epoll(epoll_create(1 << 16))
+    , m_locations(16)
+    , m_incoming()
+    , m_channels(sysconf(_SC_OPEN_MAX))
+    , m_postponed()
+{
+
+    if (m_epoll.get() < 0)
+    {
+        throw po6::error(errno);
+    }
+
+    for (size_t i = 0; i < m_channels.size(); ++i)
+    {
+        m_channels[i].reset(new channel());
+    }
+}
+#endif // st
 
 CLASSNAME :: ~CLASSNAME() throw ()
 {
@@ -401,10 +422,9 @@ CLASSNAME :: send(const po6::net::location& to,
 
     // Pack the size into the header
     *msg << static_cast<uint32_t>(msg->size());
-
-#ifdef BUSYBEE_MULTITHREADED
     chan->outgoing.push(msg);
 
+#ifdef BUSYBEE_MULTITHREADED
     // Acquire the lock to call work_write (if multithreaded)
     if (!chan->mtx.trylock())
     {
@@ -614,11 +634,12 @@ CLASSNAME :: get_channel(const po6::net::location& to, channel** chan, uint32_t*
         {
             try
             {
-#ifdef BUSYBEE_MULTITHREADED
-                uint64_t hash = po6::net::location::hash(to);
-                e::striped_lock<po6::threads::mutex>::hold hold(&m_connectlocks, hash);
-#endif
                 po6::net::socket soc(to.address.family(), SOCK_STREAM, IPPROTO_TCP);
+#ifdef BUSYBEE_MULTITHREADED
+                po6::threads::mutex::hold chanhold(&m_channels[soc.get()]->mtx);
+                uint64_t hash = po6::net::location::hash(to);
+                e::striped_lock<po6::threads::mutex>::hold lochold(&m_connectlocks, hash);
+#endif
                 soc.set_reuseaddr();
 #ifdef BUSYBEE_ACCEPT
                 soc.bind(m_bindto);
@@ -645,10 +666,6 @@ CLASSNAME :: get_channel(po6::net::socket* soc, channel** ret, uint32_t* chantag
     int fd = soc->get();
     assert(fd >= 0);
 
-#ifdef BUSYBEE_MULTITHREADED
-    po6::threads::mutex::hold hold(&m_channels[fd]->mtx);
-#endif
-
     soc->set_nonblocking();
     soc->set_tcp_nodelay();
     *ret = m_channels[fd].get();
@@ -660,7 +677,7 @@ CLASSNAME :: get_channel(po6::net::socket* soc, channel** ret, uint32_t* chantag
         if (add_descriptor(fd) < 0)
         {
             m_locations.remove(m_channels[fd]->loc);
-            return BUSYBEE_ADDFDFAILED;
+            return BUSYBEE_ADDFDFAIL;
         }
 
         m_channels[fd]->tag = m_channels[fd]->nexttag;
@@ -739,7 +756,7 @@ CLASSNAME :: work_accept()
     {
         if (e != EAGAIN && e != EINTR && e != EWOULDBLOCK)
         {
-            // XXX
+            return -1;
         }
     }
 
@@ -757,10 +774,13 @@ CLASSNAME:: work_close(channel* chan)
         return;
     }
 
-    m_channels[fd].reset();
-    // XXX An extremely unlikely race condition exists if "loc" has already
-    // been disconnected by the kernel, and then reconnected.
-    m_locations.remove(chan->loc);
+#ifdef BUSYBEE_MULTITHREADED
+    uint64_t hash = po6::net::location::hash(chan->loc);
+    e::striped_lock<po6::threads::mutex>::hold hold(&m_connectlocks, hash);
+#endif
+    bool rem = m_locations.remove(chan->loc);
+    assert(rem);
+    m_channels[fd]->reset();
 }
 
 bool
@@ -786,8 +806,9 @@ CLASSNAME :: work_read(channel* chan,
     }
 
     // Read into our temporary local buffer.
-    rem = chan->soc.read(&buffer.front() + chan->inoffset,
-                         buffer.size() - chan->inoffset);
+    rem = chan->soc.recv(&buffer.front() + chan->inoffset,
+                         buffer.size() - chan->inoffset,
+                         MSG_NOSIGNAL);
 
     // If we are done with this socket (error or closed).
     if ((rem < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
@@ -893,12 +914,12 @@ CLASSNAME :: work_write(channel* chan,
         chan->outprogress = chan->outnow->as_slice();
     }
 
-    ssize_t ret = chan->soc.write(chan->outprogress.data(), chan->outprogress.size());
+    ssize_t ret = chan->soc.send(chan->outprogress.data(), chan->outprogress.size(), MSG_NOSIGNAL);
 
     if (ret < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
     {
-        work_close(chan);
         *res = BUSYBEE_DISCONNECT;
+        work_close(chan);
         return false;
     }
 
