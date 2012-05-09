@@ -50,7 +50,7 @@ benchmark(busybee* bb,
           const std::vector<po6::net::location>& others,
           bool do_send, bool do_recv)
 {
-    std::tr1::mt19937 rng;
+    std::tr1::mt19937 rng(time(NULL) * getpid());
     std::tr1::uniform_int<> dist(0, others.size() - 1);
 
 #define BILLION 1000000000
