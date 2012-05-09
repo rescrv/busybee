@@ -81,6 +81,7 @@ benchmark(busybee* bb,
             {
                 case BUSYBEE_SUCCESS:
                 case BUSYBEE_QUEUED:
+                case BUSYBEE_BUFFERFULL:
                     break;
                 case BUSYBEE_SHUTDOWN:
                 case BUSYBEE_POLLFAILED:
@@ -104,6 +105,7 @@ benchmark(busybee* bb,
                 case BUSYBEE_DISCONNECT:
                 case BUSYBEE_CONNECTFAIL:
                 case BUSYBEE_ADDFDFAIL:
+                case BUSYBEE_BUFFERFULL:
                 default:
                     std::cerr << "recv error:  " << ret << std::endl;
             }

@@ -38,6 +38,8 @@
 #include <e/atomic.h>
 #include <e/endian.h>
 #include <e/guard.h>
+#include <e/nonblocking_bounded_fifo.h>
+#include <e/pow2.h>
 
 // BusyBee
 #include "busybee_constants.h"
@@ -108,6 +110,10 @@
 
 #define CLASSNAME CONCAT(busybee_, BUSYBEE_TYPE)
 
+// Some Constants
+#define IO_BLOCKSIZE 4096
+#define NUM_MSGS_PER_RECV (IO_BLOCKSIZE / BUSYBEE_HEADER_SIZE)
+
 ///////////////////////////////// Channel Class ////////////////////////////////
 
 class CLASSNAME::channel
@@ -125,7 +131,7 @@ class CLASSNAME::channel
         po6::net::location loc; // A cached soc.getpeername.
         uint32_t tag;
         uint32_t nexttag;
-        e::lockfree_fifo<std::auto_ptr<e::buffer> > outgoing; // Messages buffered for writing.
+        e::nonblocking_bounded_fifo<std::auto_ptr<e::buffer> > outgoing; // Messages buffered for writing.
         std::auto_ptr<e::buffer> outnow; // The current message we are writing to the network.
         e::slice outprogress; // A pointer into what we've written so far.
         std::auto_ptr<e::buffer> inprogress; // When reading from the network, we buffer partial reads here.
@@ -148,7 +154,7 @@ CLASSNAME :: channel :: channel()
     , loc()
     , tag(0)
     , nexttag(1)
-    , outgoing()
+    , outgoing(512)
     , outnow()
     , outprogress()
     , inprogress()
@@ -242,7 +248,7 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
     , m_bindto(ip, outgoing)
     , m_connectlocks(num_threads * 4)
     , m_locations(16)
-    , m_incoming()
+    , m_incoming(e::next_pow2(num_threads * NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed()
     , m_pause_barrier(num_threads)
@@ -277,6 +283,7 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
         case BUSYBEE_DISCONNECT:
         case BUSYBEE_CONNECTFAIL:
         case BUSYBEE_ADDFDFAIL:
+        case BUSYBEE_BUFFERFULL:
         default:
             throw std::runtime_error("Could not create connection to self.");
     }
@@ -302,7 +309,7 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
     , m_listen(ip.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_bindto(ip, outgoing)
     , m_locations(16)
-    , m_incoming()
+    , m_incoming(e::next_pow2(NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed()
 {
@@ -335,6 +342,7 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
         case BUSYBEE_DISCONNECT:
         case BUSYBEE_CONNECTFAIL:
         case BUSYBEE_ADDFDFAIL:
+        case BUSYBEE_BUFFERFULL:
         default:
             throw std::runtime_error("Could not create connection to self.");
     }
@@ -356,7 +364,7 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
 busybee_st :: busybee_st()
     : m_epoll(epoll_create(1 << 16))
     , m_locations(16)
-    , m_incoming()
+    , m_incoming(e::next_pow2(NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed()
 {
@@ -422,7 +430,11 @@ CLASSNAME :: send(const po6::net::location& to,
 
     // Pack the size into the header
     *msg << static_cast<uint32_t>(msg->size());
-    chan->outgoing.push(msg);
+
+    if (!chan->outgoing.push(msg))
+    {
+        return BUSYBEE_BUFFERFULL;
+    }
 
 #ifdef BUSYBEE_MULTITHREADED
     // Acquire the lock to call work_write (if multithreaded)
@@ -593,14 +605,14 @@ CLASSNAME :: recv(po6::net::location* from,
 }
 
 #ifdef BUSYBEE_ACCEPT
-void
+bool
 CLASSNAME :: deliver(const po6::net::location& from,
                      std::auto_ptr<e::buffer> msg)
 {
     message m;
     m.loc = from;
     m.buf = msg;
-    m_incoming.push(m);
+    return m_incoming.push(m);
 }
 
 po6::net::location
@@ -877,6 +889,7 @@ CLASSNAME :: work_read(channel* chan,
                     message m;
                     m.loc = chan->loc;
                     m.buf = chan->inprogress;
+                    // XXX This may fail
                     m_incoming.push(m);
                 }
                 else

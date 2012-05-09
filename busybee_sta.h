@@ -44,6 +44,7 @@
 #include <e/buffer.h>
 #include <e/lockfree_fifo.h>
 #include <e/lockfree_hash_map.h>
+#include <e/nonblocking_bounded_fifo.h>
 #include <e/striped_lock.h>
 
 // BusyBee
@@ -65,7 +66,7 @@ class busybee_sta
         // Deliver a message (put it on the queue) as if it came from "from".
         // This will *not* wake up threads.  This is intentional so the thread
         // calling deliver will possibly pull the delivered item from the queue.
-        void deliver(const po6::net::location& from, std::auto_ptr<e::buffer> msg);
+        bool deliver(const po6::net::location& from, std::auto_ptr<e::buffer> msg);
 
     public:
         po6::net::location inbound();
@@ -116,7 +117,7 @@ class busybee_sta
         po6::net::socket m_listen;
         po6::net::location m_bindto;
         e::lockfree_hash_map<po6::net::location, std::pair<int, uint32_t>, po6::net::location::hash> m_locations;
-        e::lockfree_fifo<message> m_incoming;
+        e::nonblocking_bounded_fifo<message> m_incoming;
         std::vector<std::tr1::shared_ptr<channel> > m_channels;
         e::lockfree_fifo<pending> m_postponed;
 };
