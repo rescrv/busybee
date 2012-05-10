@@ -42,7 +42,6 @@
 
 // e
 #include <e/buffer.h>
-#include <e/lockfree_fifo.h>
 #include <e/lockfree_hash_map.h>
 #include <e/nonblocking_bounded_fifo.h>
 #include <e/striped_lock.h>
@@ -145,7 +144,7 @@ class busybee_mta
         e::lockfree_hash_map<po6::net::location, std::pair<int, uint32_t>, po6::net::location::hash> m_locations;
         e::nonblocking_bounded_fifo<message> m_incoming;
         std::vector<std::tr1::shared_ptr<channel> > m_channels;
-        e::lockfree_fifo<pending> m_postponed;
+        e::nonblocking_bounded_fifo<pending> m_postponed;
         e::worker_barrier m_pause_barrier;
         bool m_shutdown;
 };

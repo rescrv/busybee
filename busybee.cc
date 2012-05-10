@@ -250,7 +250,7 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
     , m_locations(16)
     , m_incoming(e::next_pow2(num_threads * NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
-    , m_postponed()
+    , m_postponed(e::next_pow2(m_channels.size() * 2))
     , m_pause_barrier(num_threads)
     , m_shutdown(false)
 {
@@ -311,7 +311,7 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
     , m_locations(16)
     , m_incoming(e::next_pow2(NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
-    , m_postponed()
+    , m_postponed(e::next_pow2(m_channels.size() * 2))
 {
 
     if (m_epoll.get() < 0)
@@ -366,7 +366,7 @@ busybee_st :: busybee_st()
     , m_locations(16)
     , m_incoming(e::next_pow2(NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
-    , m_postponed()
+    , m_postponed(e::next_pow2(m_channels.size() * 2))
 {
 
     if (m_epoll.get() < 0)
