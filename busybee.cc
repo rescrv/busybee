@@ -808,18 +808,18 @@ CLASSNAME :: work_read(channel* chan,
         return false;
     }
 
-    std::vector<uint8_t> buffer(65536, 0);
+    uint8_t buffer[IO_BLOCKSIZE];
     ssize_t rem;
 
     // Restore leftovers from last time.
     if (chan->inoffset)
     {
-        memmove(&buffer.front(), chan->inbuffer, chan->inoffset);
+        memmove(buffer, chan->inbuffer, chan->inoffset);
     }
 
     // Read into our temporary local buffer.
-    rem = chan->soc.recv(&buffer.front() + chan->inoffset,
-                         buffer.size() - chan->inoffset,
+    rem = chan->soc.recv(buffer + chan->inoffset,
+                         IO_BLOCKSIZE - chan->inoffset,
                          MSG_NOSIGNAL);
 
     // If we are done with this socket (error or closed).
@@ -837,7 +837,7 @@ CLASSNAME :: work_read(channel* chan,
     }
 
     // If we could read more.
-    if (static_cast<size_t>(rem) == buffer.size() - chan->inoffset)
+    if (static_cast<size_t>(rem) == IO_BLOCKSIZE - chan->inoffset)
     {
         e::atomic::or_32_nobarrier(&chan->events, EPOLLIN);
     }
@@ -845,7 +845,7 @@ CLASSNAME :: work_read(channel* chan,
     // We know rem is >= 0, so add the amount of preexisting data.
     rem += chan->inoffset;
     chan->inoffset = 0;
-    uint8_t* data = &buffer.front();
+    uint8_t* data = buffer;
     bool ret = false;
 
     // XXX If this fails to allocate memory at any time, we need to just close
