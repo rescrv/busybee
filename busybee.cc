@@ -478,16 +478,6 @@ busybee_returncode
 CLASSNAME :: recv(po6::net::location* from,
                   std::auto_ptr<e::buffer>* msg)
 {
-    message m;
-    bool ret = m_incoming.pop(&m);
-
-    if (ret)
-    {
-        *from = m.loc;
-        *msg = m.buf;
-        return BUSYBEE_SUCCESS;
-    }
-
     while (true)
     {
 #ifdef BUSYBEE_MULTITHREADED
@@ -499,9 +489,9 @@ CLASSNAME :: recv(po6::net::location* from,
         }
 #endif // BUSYBEE_MULTITHREADED
 
-        ret = m_incoming.pop(&m);
+        message m;
 
-        if (ret)
+        if (m_incoming.pop(&m))
         {
             *from = m.loc;
             *msg = m.buf;
