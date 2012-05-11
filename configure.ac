@@ -16,6 +16,8 @@ AC_PROG_CXX
 AC_PROG_CC
 AC_LANG(C++)
 
+ANAL_WARNINGS_CXX
+
 # Checks for libraries.
 PKG_CHECK_MODULES([PO6], [libpo6 >= 0.2])
 PKG_CHECK_MODULES([E], [libe >= 0.2])
