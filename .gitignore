@@ -7,6 +7,7 @@ busybee-bench-st
 busybee-bench-sta
 busybee-bench-sta.o
 busybee-bench-st.o
+busybee.pc
 config.guess
 config.h
 config.h.in

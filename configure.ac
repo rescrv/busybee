@@ -43,5 +43,6 @@ AC_CHECK_FUNCS([alarm clock_gettime ftruncate memmove mkdir munmap rmdir socket]
 
 # Optional components
 
-AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile
+                 busybee.pc])
 AC_OUTPUT

@@ -26,7 +26,7 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
-AM_CXXFLAGS = -fvisibility=hidden -fPIC $(WANAL_CXXFLAGS)
+AM_CXXFLAGS = -fvisibility=hidden -fPIC $(WANAL_CXXFLAGS) $(E_CFLAGS)
 
 EXTRA_DIST = LICENSE
 
@@ -58,3 +58,6 @@ busybee_bench_sta_LDADD = libbusybee-sta.la -le -lrt
 
 busybee_bench_st_SOURCES = busybee-bench-st.cc
 busybee_bench_st_LDADD = libbusybee-st.la -le -lrt
+
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = busybee.pc
