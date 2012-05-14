@@ -36,4 +36,10 @@
 #define BUSYBEE_HEADER_SIZE sizeof(uint32_t)
 #define BUSYBEE_MAX_MSG_SIZE UINT32_MAX
 
+enum busybe_events
+{
+    BUSYBEE_E_IN = 1,
+    BUSYBEE_E_OUT = 2
+};
+
 #endif // busybee_constants_h_

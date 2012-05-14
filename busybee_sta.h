@@ -58,6 +58,14 @@ class busybee_sta
         ~busybee_sta() throw ();
 
     public:
+        void set_timeout(int timeout);
+
+    public:
+        int add_external_fd(int fd, uint32_t events);
+        void get_last_external(int* fd, uint32_t* events);
+
+    public:
+        busybee_returncode drop(const po6::net::location& to);
         busybee_returncode send(const po6::net::location& to,
                                 std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(po6::net::location* from,
@@ -119,6 +127,9 @@ class busybee_sta
         e::nonblocking_bounded_fifo<message> m_incoming;
         std::vector<std::tr1::shared_ptr<channel> > m_channels;
         e::nonblocking_bounded_fifo<pending> m_postponed;
+        int m_timeout;
+        int m_external_fd;
+        int m_external_events;
 };
 
 #endif // busybee_sta_h_

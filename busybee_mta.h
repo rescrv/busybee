@@ -72,6 +72,14 @@ class busybee_mta
         void unpause();
 
     public:
+        void set_timeout(int timeout);
+
+    public:
+        int add_external_fd(int fd, uint32_t events);
+        void get_last_external(int* fd, uint32_t* events);
+
+    public:
+        busybee_returncode drop(const po6::net::location& to);
         busybee_returncode send(const po6::net::location& to,
                                 std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(po6::net::location* from,
@@ -146,6 +154,9 @@ class busybee_mta
         std::vector<std::tr1::shared_ptr<channel> > m_channels;
         e::nonblocking_bounded_fifo<pending> m_postponed;
         e::worker_barrier m_pause_barrier;
+        int m_timeout;
+        int m_external_fd;
+        int m_external_events;
         bool m_shutdown;
 };
 

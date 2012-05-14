@@ -252,6 +252,9 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed(e::next_pow2(m_channels.size() * 2))
     , m_pause_barrier(num_threads)
+    , m_timeout(-1)
+    , m_external_fd(0)
+    , m_external_events(0)
     , m_shutdown(false)
 {
 
@@ -284,6 +287,8 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
         case BUSYBEE_CONNECTFAIL:
         case BUSYBEE_ADDFDFAIL:
         case BUSYBEE_BUFFERFULL:
+        case BUSYBEE_TIMEOUT:
+        case BUSYBEE_EXTERNAL:
         default:
             throw std::runtime_error("Could not create connection to self.");
     }
@@ -312,6 +317,9 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
     , m_incoming(e::next_pow2(NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed(e::next_pow2(m_channels.size() * 2))
+    , m_timeout(-1)
+    , m_external_fd(0)
+    , m_external_events(0)
 {
 
     if (m_epoll.get() < 0)
@@ -343,6 +351,8 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
         case BUSYBEE_CONNECTFAIL:
         case BUSYBEE_ADDFDFAIL:
         case BUSYBEE_BUFFERFULL:
+        case BUSYBEE_TIMEOUT:
+        case BUSYBEE_EXTERNAL:
         default:
             throw std::runtime_error("Could not create connection to self.");
     }
@@ -367,6 +377,9 @@ busybee_st :: busybee_st()
     , m_incoming(e::next_pow2(NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed(e::next_pow2(m_channels.size() * 2))
+    , m_timeout(-1)
+    , m_external_fd(0)
+    , m_external_events(0)
 {
 
     if (m_epoll.get() < 0)
@@ -412,6 +425,60 @@ CLASSNAME :: unpause()
 }
 #endif // BUSYBEE_MULTITHREADED
 
+void
+CLASSNAME :: set_timeout(int timeout)
+{
+    m_timeout = timeout;
+}
+
+int
+CLASSNAME :: add_external_fd(int fd, uint32_t events)
+{
+    assert(fd > 0);
+#ifdef BUSYBEE_MULTITHREADED
+    po6::threads::mutex::hold hold(&m_channels[fd]->mtx);
+#endif // BUSYBEE_MULTITHREADED
+    work_close(m_channels[fd].get());
+    m_channels[fd]->tag = -1;
+    epoll_event ee;
+    ee.data.fd = fd;
+    ee.events = events;
+    return epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, fd, &ee);
+}
+
+void
+CLASSNAME :: get_last_external(int* fd, uint32_t* events)
+{
+    *fd = m_external_fd;
+    *events = m_external_events;
+}
+
+busybee_returncode
+CLASSNAME :: drop(const po6::net::location& to)
+{
+    channel* chan;
+    uint32_t chantag;
+    busybee_returncode res = get_channel(to, &chan, &chantag);
+
+    // Getting a channel fails
+    if (res != BUSYBEE_SUCCESS)
+    {
+        return res;
+    }
+
+#ifdef BUSYBEE_MULTITHREADED
+    po6::threads::mutex::hold hold(&chan->mtx);
+#endif // BUSYBEE_MULTITHREADED
+
+    if (chantag != chan->tag)
+    {
+        return BUSYBEE_SUCCESS;
+    }
+
+    work_close(chan);
+    return BUSYBEE_SUCCESS;
+}
+
 busybee_returncode
 CLASSNAME :: send(const po6::net::location& to,
                   std::auto_ptr<e::buffer> msg)
@@ -455,8 +522,10 @@ CLASSNAME :: send(const po6::net::location& to,
     // then postpone events that were generated while we held the lock.  The
     // destructors run in reverse order, so the channel will be unlocked,
     // and then postponed.
+#endif // BUSYBEE_MULTITHREADED
     e::guard g1 = e::makeobjguard(*this, & CLASSNAME ::postpone_event, chan);
     g1.use_variable();
+#ifdef BUSYBEE_MULTITHREADED
     e::guard g2 = e::makeobjguard(chan->mtx, &po6::threads::mutex::unlock);
     g2.use_variable();
 #endif // BUSYBEE_MULTITHREADED
@@ -510,6 +579,11 @@ CLASSNAME :: recv(po6::net::location* from,
                     errno != EWOULDBLOCK)
             {
                 return BUSYBEE_POLLFAILED;
+            }
+
+            if (status >= 0 && errno == EINTR)
+            {
+                return BUSYBEE_TIMEOUT;
             }
 
             continue;
@@ -734,7 +808,7 @@ CLASSNAME :: receive_event(int*fd, uint32_t* events)
     }
 
     epoll_event ee;
-    int ret = epoll_wait(m_epoll.get(), &ee, 1, 50);
+    int ret = epoll_wait(m_epoll.get(), &ee, 1, m_timeout < 0 ? 50 : m_timeout);
     *fd = ee.data.fd;
     *events = ee.events;
     return ret;

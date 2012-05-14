@@ -41,7 +41,9 @@ enum busybee_returncode
     BUSYBEE_DISCONNECT  = 4612,
     BUSYBEE_CONNECTFAIL = 4613,
     BUSYBEE_ADDFDFAIL   = 4614,
-    BUSYBEE_BUFFERFULL  = 4615
+    BUSYBEE_BUFFERFULL  = 4615,
+    BUSYBEE_TIMEOUT     = 4616,
+    BUSYBEE_EXTERNAL    = 4617
 };
 
 #define str(x) #x
@@ -61,6 +63,8 @@ operator << (std::ostream& lhs, busybee_returncode rhs)
         stringify(BUSYBEE_CONNECTFAIL);
         stringify(BUSYBEE_ADDFDFAIL);
         stringify(BUSYBEE_BUFFERFULL);
+        stringify(BUSYBEE_TIMEOUT);
+        stringify(BUSYBEE_EXTERNAL);
         default:
             lhs << "unknown returncode";
             break;
