@@ -581,7 +581,7 @@ CLASSNAME :: recv(po6::net::location* from,
                 return BUSYBEE_POLLFAILED;
             }
 
-            if (status >= 0 && errno == EINTR)
+            if (status >= 0 && errno == EINTR && m_timeout >= 0)
             {
                 return BUSYBEE_TIMEOUT;
             }
