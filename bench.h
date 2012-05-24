@@ -88,6 +88,8 @@ benchmark(busybee* bb,
                 case BUSYBEE_DISCONNECT:
                 case BUSYBEE_CONNECTFAIL:
                 case BUSYBEE_ADDFDFAIL:
+                case BUSYBEE_TIMEOUT:
+                case BUSYBEE_EXTERNAL:
                 default:
                     std::cerr << "send error:  " << ret << std::endl;
             }
@@ -106,6 +108,8 @@ benchmark(busybee* bb,
                 case BUSYBEE_CONNECTFAIL:
                 case BUSYBEE_ADDFDFAIL:
                 case BUSYBEE_BUFFERFULL:
+                case BUSYBEE_TIMEOUT:
+                case BUSYBEE_EXTERNAL:
                 default:
                     std::cerr << "recv error:  " << ret << std::endl;
             }
