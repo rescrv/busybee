@@ -7,6 +7,6 @@ Name: busybee
 Description: High performance messaging layer
 Version: @VERSION@
 
-Requires: libpo6 >= 0.2 libe >= 0.2
+Requires: libpo6 >= 0.2.3 libe >= 0.2.7
 Libs: -L${libdir}
 Cflags: -I${includedir}
