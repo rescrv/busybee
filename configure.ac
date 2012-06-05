@@ -4,7 +4,7 @@
 AC_PREREQ([2.66])
 AC_INIT([BusyBee], [0.2.dev], [escriva@cs.cornell.edu])
 AM_INIT_AUTOMAKE([foreign subdir-objects dist-bzip2 dist-lzma])
-AM_SILENT_RULES([yes])
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 LT_PREREQ([2.2])
 LT_INIT
 AC_CONFIG_SRCDIR([busybee.cc])
