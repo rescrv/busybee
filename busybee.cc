@@ -25,6 +25,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+#if HAVE_CONFIG_H
+# include "config.h"
+#endif
+
 #define __STDC_LIMIT_MACROS
 
 // Linux
@@ -742,6 +746,11 @@ CLASSNAME :: get_channel(po6::net::socket* soc, channel** ret, uint32_t* chantag
     int fd = soc->get();
     assert(fd >= 0);
 
+#ifdef HAVE_SO_NOSIGPIPE
+    int sigpipeopt = 1;
+    soc->set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
+#endif // HAVE_SO_NOSIGPIPE
+
     soc->set_nonblocking();
     soc->set_tcp_nodelay();
     *ret = m_channels[fd].get();
@@ -882,9 +891,13 @@ CLASSNAME :: work_read(channel* chan,
     }
 
     // Read into our temporary local buffer.
+    int flags = 0;
+#ifdef HAVE_MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif // HAVE_MSG_NOSIGNAL
     rem = chan->soc.recv(buffer + chan->inoffset,
                          IO_BLOCKSIZE - chan->inoffset,
-                         MSG_NOSIGNAL);
+                         flags);
 
     // If we are done with this socket (error or closed).
     if ((rem < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
@@ -991,7 +1004,11 @@ CLASSNAME :: work_write(channel* chan,
         chan->outprogress = chan->outnow->as_slice();
     }
 
-    ssize_t ret = chan->soc.send(chan->outprogress.data(), chan->outprogress.size(), MSG_NOSIGNAL);
+    int flags = 0;
+#ifdef HAVE_MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif // HAVE_MSG_NOSIGNAL
+    ssize_t ret = chan->soc.send(chan->outprogress.data(), chan->outprogress.size(), flags);
 
     if (ret < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
     {

@@ -35,6 +35,8 @@ AC_TYPE_UINT16_T
 AC_TYPE_UINT32_T
 AC_TYPE_UINT64_T
 AC_TYPE_UINT8_T
+AC_EGREP_HEADER([MSG_NOSIGNAL],[sys/socket.h],AC_DEFINE([HAVE_MSG_NOSIGNAL],[1],[Defined to 1 if you have the MSG_NOSIGNAL constant]))
+AC_EGREP_HEADER([SO_NOSIGPIPE],[sys/socket.h],AC_DEFINE([HAVE_SO_NOSIGPIPE],[1],[Defined to 1 if you have the SO_NOSIGPIPE constant]))
 
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
