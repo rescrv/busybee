@@ -108,6 +108,8 @@ class busybee_mta
         int add_descriptor(int fd);
         void postpone_event(channel* chan);
         int receive_event(int*fd, uint32_t* events);
+        // Alert the threads to wake them up with eventfd
+        void up_the_semaphore();
         // Accept a new socket, and return the file descriptor number.
         int work_accept();
         // Remove the channel and set the resources to be freed.
@@ -146,6 +148,7 @@ class busybee_mta
 
     private:
         po6::io::fd m_epoll;
+        po6::io::fd m_eventfd;
         po6::net::socket m_listen;
         po6::net::location m_bindto;
         e::striped_lock<po6::threads::mutex> m_connectlocks;
@@ -153,7 +156,14 @@ class busybee_mta
         e::nonblocking_bounded_fifo<message> m_incoming;
         std::vector<std::tr1::shared_ptr<channel> > m_channels;
         e::nonblocking_bounded_fifo<pending> m_postponed;
-        e::worker_barrier m_pause_barrier;
+
+        size_t m_pause_count;
+        bool m_pause_paused;
+        size_t m_pause_num;
+        po6::threads::mutex m_pause_lock;
+        po6::threads::cond m_pause_all_paused;
+        po6::threads::cond m_pause_may_unpause;
+
         int m_timeout;
         int m_external_fd;
         int m_external_events;

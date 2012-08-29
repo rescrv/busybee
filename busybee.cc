@@ -33,6 +33,7 @@
 
 // Linux
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 
 // po6
 #include <po6/net/socket.h>
@@ -44,6 +45,7 @@
 #include <e/guard.h>
 #include <e/nonblocking_bounded_fifo.h>
 #include <e/pow2.h>
+#include <e/timer.h>
 
 // BusyBee
 #include "busybee_constants.h"
@@ -248,6 +250,7 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
                            in_port_t outgoing,
                            size_t num_threads)
     : m_epoll(epoll_create(1 << 16))
+    , m_eventfd(eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE))
     , m_listen(ip.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_bindto(ip, outgoing)
     , m_connectlocks(num_threads * 4)
@@ -255,14 +258,23 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
     , m_incoming(e::next_pow2(num_threads * NUM_MSGS_PER_RECV))
     , m_channels(sysconf(_SC_OPEN_MAX))
     , m_postponed(e::next_pow2(m_channels.size() * 2))
-    , m_pause_barrier(num_threads)
+    , m_pause_count(num_threads)
+    , m_pause_paused(false)
+    , m_pause_num(0)
+    , m_pause_lock()
+    , m_pause_all_paused(&m_pause_lock)
+    , m_pause_may_unpause(&m_pause_lock)
     , m_timeout(-1)
     , m_external_fd(0)
     , m_external_events(0)
     , m_shutdown(false)
 {
-
     if (m_epoll.get() < 0)
+    {
+        throw po6::error(errno);
+    }
+
+    if (m_eventfd.get() < 0)
     {
         throw po6::error(errno);
     }
@@ -300,10 +312,19 @@ busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
     m_bindto = chan->soc.getsockname();
 
     epoll_event ee;
+    memset(&ee, 0, sizeof(ee));
     ee.data.fd = m_listen.get();
     ee.events = EPOLLIN;
 
     if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_listen.get(), &ee) < 0)
+    {
+        throw po6::error(errno);
+    }
+
+    ee.data.fd = m_eventfd.get();
+    ee.events = EPOLLIN;
+
+    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_eventfd.get(), &ee) < 0)
     {
         throw po6::error(errno);
     }
@@ -325,7 +346,6 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
     , m_external_fd(0)
     , m_external_events(0)
 {
-
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
@@ -364,6 +384,7 @@ busybee_sta :: busybee_sta(const po6::net::ipaddr& ip,
     m_bindto = chan->soc.getsockname();
 
     epoll_event ee;
+    memset(&ee, 0, sizeof(ee));
     ee.data.fd = m_listen.get();
     ee.events = EPOLLIN;
 
@@ -385,7 +406,6 @@ busybee_st :: busybee_st()
     , m_external_fd(0)
     , m_external_events(0)
 {
-
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
@@ -412,20 +432,30 @@ CLASSNAME :: ~CLASSNAME() throw ()
 void
 CLASSNAME :: shutdown()
 {
+    po6::threads::mutex::hold hold(&m_pause_lock);
     m_shutdown = true;
-    m_pause_barrier.shutdown();
+    up_the_semaphore();
 }
 
 void
 CLASSNAME :: pause()
 {
-    m_pause_barrier.pause();
+    po6::threads::mutex::hold hold(&m_pause_lock);
+    m_pause_paused = true;
+    up_the_semaphore();
+
+    while (m_pause_num < m_pause_count)
+    {
+        m_pause_all_paused.wait();
+    }
 }
 
 void
 CLASSNAME :: unpause()
 {
-    m_pause_barrier.unpause();
+    po6::threads::mutex::hold hold(&m_pause_lock);
+    m_pause_paused = false;
+    m_pause_may_unpause.broadcast();
 }
 #endif // BUSYBEE_MULTITHREADED
 
@@ -551,10 +581,31 @@ busybee_returncode
 CLASSNAME :: recv(po6::net::location* from,
                   std::auto_ptr<e::buffer>* msg)
 {
+#ifdef BUSYBEE_MULTITHREADED
+    bool need_to_pause = false;
+#endif // BUSYBEE_MULTITHREADED
+
     while (true)
     {
 #ifdef BUSYBEE_MULTITHREADED
-        m_pause_barrier.pausepoint();
+        if (need_to_pause)
+        {
+            po6::threads::mutex::hold hold(&m_pause_lock);
+
+            while (m_pause_paused && !m_shutdown)
+            {
+                ++m_pause_num;
+                assert(m_pause_num <= m_pause_count);
+
+                if (m_pause_num == m_pause_count)
+                {
+                    m_pause_all_paused.signal();
+                }
+
+                m_pause_may_unpause.wait();
+                --m_pause_num;
+            }
+        }
 
         if (m_shutdown)
         {
@@ -585,13 +636,27 @@ CLASSNAME :: recv(po6::net::location* from,
                 return BUSYBEE_POLLFAILED;
             }
 
-            if (status >= 0 && errno == EINTR && m_timeout >= 0)
+            if (status == 0 && m_timeout >= 0)
             {
                 return BUSYBEE_TIMEOUT;
             }
 
             continue;
         }
+
+#ifdef BUSYBEE_MULTITHREADED
+        if (fd == m_eventfd.get())
+        {
+            if ((events & EPOLLIN))
+            {
+                char buf[8];
+                m_eventfd.read(buf, 8);
+                need_to_pause = true;
+                __sync_synchronize();
+                continue;
+            }
+        }
+#endif // BUSYBEE_MULTITHREADED
 
 #ifdef BUSYBEE_ACCEPT
         // Ignore file descriptors opened elsewhere.
@@ -604,7 +669,7 @@ CLASSNAME :: recv(po6::net::location* from,
 
             continue;
         }
-#endif
+#endif // BUSYBEE_ACCEPT
 
 #ifdef BUSYBEE_MULTITHREADED
         // Acquire the lock to call work_write (if multithreaded)
@@ -780,6 +845,7 @@ int
 CLASSNAME :: add_descriptor(int fd)
 {
     epoll_event ee;
+    memset(&ee, 0, sizeof(ee));
     ee.data.fd = fd;
     ee.events = EPOLLIN|EPOLLOUT|EPOLLET;
     return epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, fd, &ee);
@@ -817,11 +883,22 @@ CLASSNAME :: receive_event(int*fd, uint32_t* events)
     }
 
     epoll_event ee;
-    int ret = epoll_wait(m_epoll.get(), &ee, 1, m_timeout < 0 ? 50 : m_timeout);
+    int ret = epoll_wait(m_epoll.get(), &ee, 1, m_timeout);
     *fd = ee.data.fd;
     *events = ee.events;
     return ret;
 }
+
+#ifdef BUSYBEE_MULTITHREADED
+void
+CLASSNAME :: up_the_semaphore()
+{
+    __sync_synchronize();
+    uint64_t num = m_pause_count;
+    ssize_t ret = m_eventfd.write(&num, sizeof(num));
+    assert(ret == sizeof(num));
+}
+#endif // BUSYBEE_MULTITHREADED
 
 #ifdef BUSYBEE_ACCEPT
 int
