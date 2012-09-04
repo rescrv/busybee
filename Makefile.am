@@ -26,7 +26,7 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
-AM_CXXFLAGS = -fPIC $(WANAL_CXXFLAGS) $(E_CFLAGS)
+AM_CXXFLAGS = $(WANAL_CXXFLAGS) $(E_CFLAGS)
 
 EXTRA_DIST = LICENSE
 
@@ -38,15 +38,12 @@ lib_LTLIBRARIES = libbusybee-mta.la libbusybee-sta.la libbusybee-st.la
 
 libbusybee_mta_la_SOURCES = busybee.cc
 libbusybee_mta_la_CPPFLAGS = -DBUSYBEE_MTA
-libbusybee_mta_la_LDFLAGS = -static
 
 libbusybee_sta_la_SOURCES = busybee.cc
 libbusybee_sta_la_CPPFLAGS = -DBUSYBEE_STA
-libbusybee_sta_la_LDFLAGS = -static
 
 libbusybee_st_la_SOURCES = busybee.cc
 libbusybee_st_la_CPPFLAGS = -DBUSYBEE_ST
-libbusybee_st_la_LDFLAGS = -static
 
 EXTRA_PROGRAMS = busybee-bench-mta busybee-bench-sta busybee-bench-st
 
