@@ -817,7 +817,6 @@ CLASSNAME :: get_channel(po6::net::socket* soc, channel** ret, uint32_t* chantag
 #endif // HAVE_SO_NOSIGPIPE
 
     soc->set_nonblocking();
-    soc->set_tcp_nodelay();
     *ret = m_channels[fd].get();
     m_channels[fd]->reset(soc);
     std::pair<int, uint32_t> locid(fd, m_channels[fd]->nexttag);
