@@ -1106,6 +1106,10 @@ CLASSNAME :: work_write(channel* chan,
             e::atomic::or_32_nobarrier(&chan->events, EPOLLOUT);
         }
     }
+    else
+    {
+        e::atomic::or_32_nobarrier(&chan->events, EPOLLOUT);
+    }
 
     return true;
 }
