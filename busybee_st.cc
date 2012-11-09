@@ -25,37 +25,5 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// C
-#include <cstdlib>
-
-// C++
-#include <iostream>
-
-// BusyBee
-#include "busybee_sta.h"
-
-#include "bench.h"
-
-int
-main(int argc, const char* argv[])
-{
-    if (argc % 2 != 1 || argc < 5)
-    {
-        std::cerr << "usage: " << argv[0] << " <bind ip> <bind port> "
-                  << "[<connect ip> <connect port> ...]" << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    po6::net::location us(argv[1], atoi(argv[2]));
-    std::vector<po6::net::location> others;
-
-    for (int i = 3; i < argc; i += 2)
-    {
-        po6::net::location loc(argv[i], atoi(argv[i + 1]));
-        others.push_back(loc);
-    }
-
-    busybee_sta busybee(us.address, us.port, 0);
-    po6::threads::mutex io;
-    return benchmark(&busybee, &io, others, true, true);
-}
+#define BUSYBEE_ST
+#include "busybee.cc"

@@ -25,64 +25,31 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// C
-#include <cstdlib>
-
-// C++
-#include <iostream>
-
-// STL
-#include <tr1/memory>
-
-// po6
-#include <po6/threads/thread.h>
-
 // BusyBee
-#include "busybee_mta.h"
+#include "busybee_returncode.h"
 
-#include "bench.h"
+#define str(x) #x
+#define xstr(x) str(x)
+#define stringify(x) case (x): lhs << xstr(x); break
 
-typedef std::tr1::shared_ptr<po6::threads::thread> thread_ptr;
-
-int
-main(int argc, const char* argv[])
+std::ostream&
+operator << (std::ostream& lhs, busybee_returncode rhs)
 {
-    if (argc % 2 != 0 || argc < 6)
+    switch (rhs)
     {
-        std::cerr << "usage: " << argv[0] << " <bind ip> <bind port> "
-                  << "[<connect ip> <connect port> ...]" << std::endl;
-        return EXIT_FAILURE;
+        stringify(BUSYBEE_SUCCESS);
+        stringify(BUSYBEE_SHUTDOWN);
+        stringify(BUSYBEE_POLLFAILED);
+        stringify(BUSYBEE_DISRUPTED);
+        stringify(BUSYBEE_ADDFDFAIL);
+        stringify(BUSYBEE_TIMEOUT);
+        default:
+            lhs << "unknown returncode";
     }
 
-    size_t numthreads = atoi(argv[1]);
-    po6::net::location us(argv[2], atoi(argv[3]));
-    std::vector<po6::net::location> others;
-
-    for (int i = 4; i < argc; i += 2)
-    {
-        po6::net::location loc(argv[i], atoi(argv[i + 1]));
-        others.push_back(loc);
-    }
-
-    std::vector<thread_ptr> threads;
-    busybee_mta busybee(us.address, us.port, 0, 1);
-    po6::threads::mutex io;
-
-    while (threads.size() < numthreads)
-    {
-        std::tr1::function<int (busybee_mta* bb, po6::threads::mutex* io,
-                                const std::vector<po6::net::location>& others,
-                                bool do_send, bool do_recv)> bench(benchmark<busybee_mta>);
-        thread_ptr t(new po6::threads::thread(std::tr1::bind(bench, &busybee, &io, others, true, true)));
-        t->start();
-        threads.push_back(t);
-
-    }
-
-    for (size_t i = 0; i < threads.size(); ++i)
-    {
-        threads[i]->join();
-    }
-
-    return 0;
+    return lhs;
 }
+
+#undef stringify
+#undef xstr
+#undef str

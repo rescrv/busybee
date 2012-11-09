@@ -30,31 +30,8 @@ AM_CXXFLAGS = $(WANAL_CXXFLAGS) $(E_CFLAGS)
 
 EXTRA_DIST = LICENSE
 
-include_HEADERS = busybee_constants.h busybee_returncode.h busybee_mta.h busybee_sta.h busybee_st.h
-
-noinst_HEADERS = bench.h
-
-lib_LTLIBRARIES = libbusybee-mta.la libbusybee-sta.la libbusybee-st.la
-
-libbusybee_mta_la_SOURCES = busybee.cc
-libbusybee_mta_la_CPPFLAGS = -DBUSYBEE_MTA
-
-libbusybee_sta_la_SOURCES = busybee.cc
-libbusybee_sta_la_CPPFLAGS = -DBUSYBEE_STA
-
-libbusybee_st_la_SOURCES = busybee.cc
-libbusybee_st_la_CPPFLAGS = -DBUSYBEE_ST
-
-EXTRA_PROGRAMS = busybee-bench-mta busybee-bench-sta busybee-bench-st
-
-busybee_bench_mta_SOURCES = busybee-bench-mta.cc
-busybee_bench_mta_LDADD = libbusybee-mta.la -le -lrt
-
-busybee_bench_sta_SOURCES = busybee-bench-sta.cc
-busybee_bench_sta_LDADD = libbusybee-sta.la -le -lrt
-
-busybee_bench_st_SOURCES = busybee-bench-st.cc
-busybee_bench_st_LDADD = libbusybee-st.la -le -lrt
-
+include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busybee_mta.h busybee_sta.h busybee_st.h busybee_single.h
+lib_LTLIBRARIES = libbusybee.la
+libbusybee_la_SOURCES = busybee_sta.cc busybee_st.cc busybee_mapper.cc busybee_single.cc busybee_utils.cc
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = busybee.pc

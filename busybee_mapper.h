@@ -25,24 +25,23 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef busybee_returncode_h_
-#define busybee_returncode_h_
+#ifndef busybee_mapper_h_
+#define busybee_mapper_h_
 
-// C++
-#include <iostream>
+// C
+#include <stdint.h>
 
-// busybee_returncode occupies [4608, 4864)
-enum busybee_returncode
+// po6
+#include <po6/net/location.h>
+
+class busybee_mapper
 {
-    BUSYBEE_SUCCESS     = 4608,
-    BUSYBEE_SHUTDOWN    = 4609,
-    BUSYBEE_POLLFAILED  = 4610,
-    BUSYBEE_DISRUPTED   = 4611,
-    BUSYBEE_ADDFDFAIL   = 4612,
-    BUSYBEE_TIMEOUT     = 4613
+    public:
+        busybee_mapper();
+        virtual ~busybee_mapper() throw ();
+
+    public:
+        virtual bool lookup(uint64_t server_id, po6::net::location* bound_to) = 0;
 };
 
-std::ostream&
-operator << (std::ostream& lhs, busybee_returncode rhs);
-
-#endif // busybee_returncode_h_
+#endif // busybee_mapper_h_

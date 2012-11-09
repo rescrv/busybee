@@ -1,12 +1,14 @@
+# wildcards
+.deps
+.dirstamp
+.libs
+*.la
+*.lo
+*.o
+# specific files
 aclocal.m4
 autom4te.cache/
 autoscan.log
-busybee-bench-mta
-busybee-bench-mta.o
-busybee-bench-st
-busybee-bench-sta
-busybee-bench-sta.o
-busybee-bench-st.o
 busybee.pc
 config.guess
 config.h
@@ -16,19 +18,8 @@ config.status
 config.sub
 configure
 depcomp
-.deps/
 destdir/
 install-sh
-libbusybee-mta.la
-libbusybee_mta_la-busybee.lo
-libbusybee_mta_la-busybee.o
-libbusybee-sta.la
-libbusybee_sta_la-busybee.lo
-libbusybee_sta_la-busybee.o
-libbusybee-st.la
-libbusybee_st_la-busybee.lo
-libbusybee_st_la-busybee.o
-.libs/
 libtool
 ltmain.sh
 m4/

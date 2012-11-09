@@ -25,24 +25,59 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef busybee_returncode_h_
-#define busybee_returncode_h_
+#ifndef busybee_single_h_
+#define busybee_single_h_
 
-// C++
-#include <iostream>
+// STL
+#include <memory>
 
-// busybee_returncode occupies [4608, 4864)
-enum busybee_returncode
+// po6
+#include <po6/net/hostname.h>
+
+// e
+#include <e/buffer.h>
+
+// BusyBee
+#include <busybee_returncode.h>
+
+class busybee_single
 {
-    BUSYBEE_SUCCESS     = 4608,
-    BUSYBEE_SHUTDOWN    = 4609,
-    BUSYBEE_POLLFAILED  = 4610,
-    BUSYBEE_DISRUPTED   = 4611,
-    BUSYBEE_ADDFDFAIL   = 4612,
-    BUSYBEE_TIMEOUT     = 4613
+    public:
+        busybee_single(const po6::net::hostname& host);
+        ~busybee_single() throw ();
+
+    public:
+        void set_timeout(int timeout);
+
+    public:
+        // This is valid so long as send has been called, and the most recent
+        // call to send or recv returned SUCCESS
+        const po6::net::location& remote() { return m_remote; }
+        // This is valid so long as recv has been called, and the most recent call
+        // to send or recv returned SUCCESS
+        uint64_t token() { return m_token; }
+
+    public:
+        busybee_returncode send(std::auto_ptr<e::buffer> msg);
+        busybee_returncode recv(std::auto_ptr<e::buffer>* msg);
+
+    private:
+        void reset();
+
+    private:
+        int m_timeout;
+        po6::net::hostname m_host;
+        po6::net::location m_remote;
+        po6::net::socket m_connection;
+        uint32_t m_recv_partial_header_sz;
+        uint8_t m_recv_partial_header[sizeof(uint32_t)];
+        std::auto_ptr<e::buffer> m_recv_partial_msg;
+        uint32_t m_flags;
+        uint64_t m_token;
+
+    private:
+        busybee_single(const busybee_single&);
+        busybee_single& operator = (const busybee_single&);
 };
 
-std::ostream&
-operator << (std::ostream& lhs, busybee_returncode rhs);
-
-#endif // busybee_returncode_h_
+#endif // busybee_single_h_

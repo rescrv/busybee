@@ -25,24 +25,13 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef busybee_returncode_h_
-#define busybee_returncode_h_
+// BusyBee
+#include "busybee_mapper.h"
 
-// C++
-#include <iostream>
-
-// busybee_returncode occupies [4608, 4864)
-enum busybee_returncode
+busybee_mapper :: busybee_mapper()
 {
-    BUSYBEE_SUCCESS     = 4608,
-    BUSYBEE_SHUTDOWN    = 4609,
-    BUSYBEE_POLLFAILED  = 4610,
-    BUSYBEE_DISRUPTED   = 4611,
-    BUSYBEE_ADDFDFAIL   = 4612,
-    BUSYBEE_TIMEOUT     = 4613
-};
+}
 
-std::ostream&
-operator << (std::ostream& lhs, busybee_returncode rhs);
-
-#endif // busybee_returncode_h_
+busybee_mapper :: ~busybee_mapper() throw ()
+{
+}
