@@ -119,11 +119,6 @@ class busybee_mta
         size_t m_pause_count;
         bool m_pause_paused;
         size_t m_pause_num;
-#if 0
-        e::striped_lock<po6::threads::mutex> m_connectlocks;
-
-
-#endif
 
     private:
         busybee_mta(const busybee_mta&);
