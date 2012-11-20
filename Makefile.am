@@ -28,7 +28,7 @@
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
 AM_CXXFLAGS = $(WANAL_CXXFLAGS) $(E_CFLAGS)
 
-EXTRA_DIST = LICENSE
+EXTRA_DIST = LICENSE busybee.cc
 
 include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busybee_mta.h busybee_sta.h busybee_st.h busybee_single.h
 lib_LTLIBRARIES = libbusybee.la
