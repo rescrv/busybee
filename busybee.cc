@@ -358,86 +358,46 @@ CLASSNAME :: discover(po6::net::ipaddr* ip)
 }
 
 #ifdef BUSYBEE_MTA
-busybee_mta :: busybee_mta(const po6::net::ipaddr& ip,
-                           in_port_t incoming,
-                           in_port_t outgoing,
+busybee_mta :: busybee_mta(busybee_mapper* mapper,
+                           const po6::net::location& bind_to,
+                           uint64_t server_id,
                            size_t num_threads)
-    : m_epoll(epoll_create(1 << 16))
-    , m_eventfd(eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE))
-    , m_listen(ip.family(), SOCK_STREAM, IPPROTO_TCP)
-    , m_bindto(ip, outgoing)
-    , m_connectlocks(num_threads * 4)
-    , m_locations(16)
-    , m_incoming(e::next_pow2(num_threads * NUM_MSGS_PER_RECV))
-    , m_channels(sysconf(_SC_OPEN_MAX))
-    , m_postponed(e::next_pow2(m_channels.size() * 2))
-    , m_pause_count(num_threads)
-    , m_pause_paused(false)
-    , m_pause_num(0)
+    : m_epoll(epoll_create(64))
+    , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
+    , m_channels_sz(sysconf(_SC_OPEN_MAX))
+    , m_channels(new channel[m_channels_sz])
+    , m_server2channel(10)
+    , m_mapper(mapper)
+    , m_server_id(server_id)
+    , m_timeout(-1)
+    , m_recv_lock()
+    , m_recv_queue(NULL)
+    , m_recv_end(&m_recv_queue)
     , m_pause_lock()
     , m_pause_all_paused(&m_pause_lock)
     , m_pause_may_unpause(&m_pause_lock)
-    , m_timeout(-1)
-    , m_external_fd(0)
-    , m_external_events(0)
     , m_shutdown(false)
+    , m_pause_count(num_threads)
+    , m_pause_paused(false)
+    , m_pause_num(0)
 {
+    po6::threads::mutex::hold holdr(&m_recv_lock);
+    po6::threads::mutex::hold holdp(&m_pause_lock);
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
     }
 
-    if (m_eventfd.get() < 0)
-    {
-        throw po6::error(errno);
-    }
-
-    for (size_t i = 0; i < m_channels.size(); ++i)
-    {
-        m_channels[i].reset(new channel());
-    }
-
-    // Enable other hosts to connect to us.
     m_listen.set_reuseaddr();
-    m_listen.bind(po6::net::location(ip, incoming));
-    m_listen.listen(sysconf(_SC_OPEN_MAX));
+    m_listen.bind(bind_to);
+    m_listen.listen(m_channels_sz);
     m_listen.set_nonblocking();
-    channel* chan;
-    uint32_t chan_tag;
-
-    switch (get_channel(m_listen.getsockname(), &chan, &chan_tag))
-    {
-        case BUSYBEE_SUCCESS:
-            break;
-        case BUSYBEE_SHUTDOWN:
-        case BUSYBEE_QUEUED:
-        case BUSYBEE_POLLFAILED:
-        case BUSYBEE_DISCONNECT:
-        case BUSYBEE_CONNECTFAIL:
-        case BUSYBEE_ADDFDFAIL:
-        case BUSYBEE_BUFFERFULL:
-        case BUSYBEE_TIMEOUT:
-        case BUSYBEE_EXTERNAL:
-        default:
-            throw std::runtime_error("Could not create connection to self.");
-    }
-
-    m_bindto = chan->soc.getsockname();
-
     epoll_event ee;
     memset(&ee, 0, sizeof(ee));
     ee.data.fd = m_listen.get();
     ee.events = EPOLLIN;
 
     if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_listen.get(), &ee) < 0)
-    {
-        throw po6::error(errno);
-    }
-
-    ee.data.fd = m_eventfd.get();
-    ee.events = EPOLLIN;
-
-    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_eventfd.get(), &ee) < 0)
     {
         throw po6::error(errno);
     }
@@ -524,10 +484,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
 CLASSNAME :: ~CLASSNAME() throw ()
 {
 #ifdef BUSYBEE_MULTITHREADED
-    if (!m_shutdown)
-    {
-        shutdown();
-    }
+    shutdown();
 #endif // BUSYBEE_MULTITHREADED
 }
 
@@ -603,7 +560,7 @@ CLASSNAME :: send(uint64_t server_id,
     }
 
 #ifdef BUSYBEE_MULTITHREADED
-    po6::threads::mutex::hold hold(&chan.mtx);
+    po6::threads::mutex::hold hold(&chan->mtx);
 #endif // BUSYBEE_MULTITHREADED
 
     if (chan_tag != chan->tag || chan->soc.get() < 0)
@@ -662,26 +619,6 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
     {
         DEBUG << "top of the loop" << std::endl;
 
-        if (m_recv_queue)
-        {
-            recv_message* m = m_recv_queue;
-
-            if (m_recv_end == &m->next)
-            {
-                m_recv_queue = NULL;
-                m_recv_end = &m_recv_queue;
-            }
-            else
-            {
-                m_recv_queue = m->next;
-            }
-
-            *id = m->id;
-            *msg = m->msg;
-            delete m;
-            return BUSYBEE_SUCCESS;
-        }
-
 #ifdef BUSYBEE_MULTITHREADED
         if (need_to_pause)
         {
@@ -712,6 +649,37 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         }
 #endif // BUSYBEE_MULTITHREADED
 
+        // this is a racy read; we assume that some thread will see the latest
+        // value (likely the one that last changed it).
+        if (m_recv_queue)
+        {
+#ifdef BUSYBEE_MULTITHREADED
+            po6::threads::mutex::hold hold(&m_recv_lock);
+
+            if (!m_recv_queue)
+            {
+                continue;
+            }
+#endif // BUSYBEE_MULTITHREADED
+
+            recv_message* m = m_recv_queue;
+
+            if (m_recv_end == &m->next)
+            {
+                m_recv_queue = NULL;
+                m_recv_end = &m_recv_queue;
+            }
+            else
+            {
+                m_recv_queue = m->next;
+            }
+
+            *id = m->id;
+            *msg = m->msg;
+            delete m;
+            return BUSYBEE_SUCCESS;
+        }
+
         DEBUG << "making syscall to poll for events" << std::endl;
         int status;
         epoll_event ee;
@@ -738,6 +706,8 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         DEBUG << "received events from the syscall" << std::endl;
 
 #ifdef BUSYBEE_MULTITHREADED
+        //X XXX
+#if 0
         if (fd == m_eventfd.get())
         {
             DEBUG << "received events for eventfd" << std::endl;
@@ -752,6 +722,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
             continue;
         }
+#endif
 #endif // BUSYBEE_MULTITHREADED
 
 #ifdef BUSYBEE_ACCEPT
@@ -838,6 +809,19 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         }
     }
 }
+
+#ifdef BUSYBEE_MULTITHREADED
+void
+CLASSNAME :: up_the_semaphore()
+{
+    // XXX
+#if 0
+    uint64_t num = m_pause_count;
+    ssize_t ret = m_eventfd.write(&num, sizeof(num));
+    assert(ret == sizeof(num));
+#endif
+}
+#endif // BUSYBEE_MULTITHREADED
 
 busybee_returncode
 CLASSNAME :: get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag)
@@ -959,17 +943,6 @@ CLASSNAME :: set_mapping(uint64_t server_id, uint64_t chan_tag)
     m_server2channel.insert(server_id, chan_tag);
 }
 
-#ifdef BUSYBEE_MULTITHREADED
-void
-CLASSNAME :: up_the_semaphore()
-{
-    __sync_synchronize();
-    uint64_t num = m_pause_count;
-    ssize_t ret = m_eventfd.write(&num, sizeof(num));
-    assert(ret == sizeof(num));
-}
-#endif // BUSYBEE_MULTITHREADED
-
 #ifdef BUSYBEE_ACCEPT
 void
 CLASSNAME :: work_accept()
@@ -1084,6 +1057,9 @@ CLASSNAME :: work_recv(channel* chan, bool* need_close, bool* quiet)
             if (chan->recv_queue)
             {
                 DEBUG << "copying received messages to global queue" << std::endl;
+#ifdef BUSYBEE_MULTITHREADED
+                po6::threads::mutex::hold hold(&m_recv_lock);
+#endif // BUSYBEE_MULTITHREADED
                 *m_recv_end = chan->recv_queue;
                 m_recv_end = chan->recv_end;
                 chan->recv_queue = NULL;
@@ -1375,10 +1351,6 @@ CLASSNAME :: send_ack(channel* chan)
     if (empty)
     {
         chan->send_progress = tmp->msg->as_slice();
-    }
-    else
-    {
-        e::atomic::or_32_nobarrier(&chan->events, EPOLLOUT);
     }
 
     bool need_close;

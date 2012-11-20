@@ -28,41 +28,40 @@
 #ifndef busybee_mta_h_
 #define busybee_mta_h_
 
-// po6
-#include <po6/io/fd.h>
-
 // STL
-#include <tr1/memory>
+#include <memory>
 
 // po6
-#include <po6/net/ipaddr.h>
 #include <po6/net/location.h>
 #include <po6/net/socket.h>
+#include <po6/threads/cond.h>
 #include <po6/threads/mutex.h>
 
 // e
+#include <e/array_ptr.h>
 #include <e/buffer.h>
 #include <e/lockfree_hash_map.h>
-#include <e/nonblocking_bounded_fifo.h>
-#include <e/striped_lock.h>
-#include <e/worker_barrier.h>
 
 // BusyBee
+#include <busybee_mapper.h>
 #include <busybee_returncode.h>
 
 class busybee_mta
 {
     public:
-        busybee_mta(const po6::net::ipaddr& ip,
-                    in_port_t incoming,
-                    in_port_t outgoing,
+        // Discover the first IP on a local interface that is not "lo".
+        static bool discover(po6::net::ipaddr* ip);
+        static uint64_t generate_id();
+
+    public:
+        busybee_mta(busybee_mapper* mapper,
+                    const po6::net::location& bind_to,
+                    uint64_t server_id,
                     size_t num_threads);
         ~busybee_mta() throw ();
 
     public:
         void shutdown();
-
-    public:
         // Enter a barrier.  All "num_threads" threads must enter the barrier
         // before the caller will leave.  All other threads will remain in the
         // barrier until "unpause" is called.  No locks will be held while
@@ -72,102 +71,63 @@ class busybee_mta
         void unpause();
 
     public:
-        void set_timeout(int timeout);
+        void set_id(uint64_t server_id);
+        void set_timeout(int timeout); // call while paused
 
     public:
-        int add_external_fd(int fd, uint32_t events);
-        void get_last_external(int* fd, uint32_t* events);
-
-    public:
-        busybee_returncode drop(const po6::net::location& to);
-        busybee_returncode send(const po6::net::location& to,
+        busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
-        busybee_returncode recv(po6::net::location* from,
+        busybee_returncode recv(uint64_t* server_id,
                                 std::auto_ptr<e::buffer>* msg);
-        // Deliver a message (put it on the queue) as if it came from "from".
-        // This will *not* wake up threads.  This is intentional so the thread
-        // calling deliver will possibly pull the delivered item from the queue.
-        bool deliver(const po6::net::location& from, std::auto_ptr<e::buffer> msg);
-
-    public:
-        po6::net::location inbound();
-        po6::net::location outbound();
+        bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
 
     private:
         class channel;
-        class message;
-        class pending;
+        class recv_message;
+        class send_message;
 
     private:
-        busybee_returncode get_channel(const po6::net::location& to,
-                                       channel** chan,
-                                       uint32_t* chantag);
-        busybee_returncode get_channel(po6::net::socket* to,
-                                       channel** chan,
-                                       uint32_t* chantag);
-        int add_descriptor(int fd);
-        void postpone_event(channel* chan);
-        int receive_event(int*fd, uint32_t* events);
-        // Alert the threads to wake them up with eventfd
         void up_the_semaphore();
-        // Accept a new socket, and return the file descriptor number.
-        int work_accept();
-        // Remove the channel and set the resources to be freed.
-        // This must be called with chan->mtx held.
+
+    private:
+        busybee_returncode get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
+        bool setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag);
+        void set_mapping(uint64_t server_id, uint64_t chan_tag);
+        void work_accept();
         void work_close(channel* chan);
-        // Read from the socket, and set it up for further reading if necessary.
-        //
-        // It will return true if "from", "msg", "res" should be returned to the
-        // user, and false otherwise.
-        //
-        // This must be called with chan->mtx held It is the caller's
-        // responsibility to check chan->events for postponed events after
-        // releasing the mutex protecting this call.  This may call work_close.
-        bool work_read(channel* chan,
-                       po6::net::location* from,
-                       std::auto_ptr<e::buffer>* msg,
-                       busybee_returncode* res);
-        // Write to the socket, and set it up for further writing if necessary.
-        // If no other messages are buffered, write msg, otherwise buffer msg,
-        // and write the buffered messages.
-        //
-        // It will return true if progress was made, and false if there is an
-        // error to report (using *res).
-        //
-        // This must be called with chan->mtx held.  It is the caller's
-        // responsibility to check chan for postponed events after releasing the
-        // mutex protecting this call.  This may call work_close.
-        bool work_write(channel* chan,
-                        busybee_returncode* res);
-
-    private:
-        busybee_mta(const busybee_mta& other);
-
-    private:
-        busybee_mta& operator = (const busybee_mta& rhs);
+        void work_recv(channel* chan, bool* need_close, bool* quiet);
+        void work_send(channel* chan, bool* need_close, bool* quiet);
+        bool send_fin(channel* chan);
+        bool send_ack(channel* chan);
 
     private:
         po6::io::fd m_epoll;
-        po6::io::fd m_eventfd;
         po6::net::socket m_listen;
-        po6::net::location m_bindto;
-        e::striped_lock<po6::threads::mutex> m_connectlocks;
-        e::lockfree_hash_map<po6::net::location, std::pair<int, uint32_t>, po6::net::location::hash> m_locations;
-        e::nonblocking_bounded_fifo<message> m_incoming;
-        std::vector<std::tr1::shared_ptr<channel> > m_channels;
-        e::nonblocking_bounded_fifo<pending> m_postponed;
-
-        size_t m_pause_count;
-        bool m_pause_paused;
-        size_t m_pause_num;
+        size_t m_channels_sz;
+        e::array_ptr<channel> m_channels;
+        e::lockfree_hash_map<uint64_t, uint64_t, e::hash_map_id> m_server2channel;
+        busybee_mapper* m_mapper;
+        uint64_t m_server_id;
+        int m_timeout;
+        po6::threads::mutex m_recv_lock;
+        recv_message* m_recv_queue;
+        recv_message** m_recv_end;
         po6::threads::mutex m_pause_lock;
         po6::threads::cond m_pause_all_paused;
         po6::threads::cond m_pause_may_unpause;
-
-        int m_timeout;
-        int m_external_fd;
-        int m_external_events;
         bool m_shutdown;
+        size_t m_pause_count;
+        bool m_pause_paused;
+        size_t m_pause_num;
+#if 0
+        e::striped_lock<po6::threads::mutex> m_connectlocks;
+
+
+#endif
+
+    private:
+        busybee_mta(const busybee_mta&);
+        busybee_mta& operator = (const busybee_mta&);
 };
 
 #endif // busybee_mta_h_
