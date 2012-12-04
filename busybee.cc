@@ -809,11 +809,11 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         if (need_close)
         {
             DEBUG << "calling work_close" << std::endl;
+            *id = chan.id;
             work_close(&chan);
 
             if (!quiet)
             {
-                *id = chan.id;
                 msg->reset();
                 DEBUG << "not a quiet close, returning DISRUPTED" << std::endl;
                 return BUSYBEE_DISRUPTED;
