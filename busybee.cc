@@ -537,6 +537,20 @@ CLASSNAME :: set_timeout(int timeout)
     m_timeout = timeout;
 }
 
+#ifdef BUSYBEE_MULTITHREADED
+bool
+CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
+{
+    recv_message* m(new recv_message(NULL, server_id, msg));
+#ifdef BUSYBEE_MULTITHREADED
+    po6::threads::mutex::hold hold(&m_recv_lock);
+#endif // BUSYBEE_MULTITHREADED
+    *m_recv_end = m;
+    m_recv_end = &(m->next);
+    return true;
+}
+#endif // BUSYBEE_MULTITHREADED
+
 busybee_returncode
 CLASSNAME :: send(uint64_t server_id,
                   std::auto_ptr<e::buffer> msg)

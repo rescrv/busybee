@@ -75,11 +75,11 @@ class busybee_mta
         void set_timeout(int timeout); // call while paused
 
     public:
+        bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(uint64_t* server_id,
                                 std::auto_ptr<e::buffer>* msg);
-        bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
 
     private:
         class channel;
