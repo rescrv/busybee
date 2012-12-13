@@ -357,6 +357,12 @@ CLASSNAME :: discover(po6::net::ipaddr* ip)
     return false;
 }
 
+uint64_t
+CLASSNAME :: generate_id()
+{
+    return e::time(); // XXX weak!
+}
+
 #ifdef BUSYBEE_MTA
 busybee_mta :: busybee_mta(busybee_mapper* mapper,
                            const po6::net::location& bind_to,
