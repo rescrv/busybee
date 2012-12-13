@@ -578,6 +578,12 @@ CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
 }
 #endif // BUSYBEE_MULTITHREADED
 
+int
+CLASSNAME :: poll_fd()
+{
+    return m_epoll.get();
+}
+
 busybee_returncode
 CLASSNAME :: drop(uint64_t server_id)
 {

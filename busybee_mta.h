@@ -76,6 +76,7 @@ class busybee_mta
 
     public:
         bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
+        int poll_fd();
         busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
