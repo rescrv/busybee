@@ -64,6 +64,7 @@ class busybee_st
         busybee_returncode set_external_fd(int fd);
 
     public:
+        busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(uint64_t* server_id,

@@ -579,6 +579,28 @@ CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
 #endif // BUSYBEE_MULTITHREADED
 
 busybee_returncode
+CLASSNAME :: drop(uint64_t server_id)
+{
+    // Get the channel for this server or fail trying
+    channel* chan = NULL;
+    uint64_t chan_tag = UINT64_MAX;
+    busybee_returncode rc = get_channel(server_id, &chan, &chan_tag);
+
+    if (rc != BUSYBEE_SUCCESS)
+    {
+        return BUSYBEE_SUCCESS;
+    }
+
+    if (chan_tag != chan->tag || chan->soc.get() < 0)
+    {
+        return BUSYBEE_SUCCESS;
+    }
+
+    work_close(chan);
+    return BUSYBEE_SUCCESS;
+}
+
+busybee_returncode
 CLASSNAME :: send(uint64_t server_id,
                   std::auto_ptr<e::buffer> msg)
 {
