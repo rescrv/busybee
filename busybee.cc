@@ -470,6 +470,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     , m_mapper(mapper)
     , m_server_id(server_id)
     , m_timeout(-1)
+    , m_external(-1)
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
 {
@@ -542,6 +543,26 @@ CLASSNAME :: set_timeout(int timeout)
 {
     m_timeout = timeout;
 }
+
+#ifdef BUSYBEE_ST
+busybee_returncode
+CLASSNAME :: set_external_fd(int fd)
+{
+    epoll_event ee;
+    memset(&ee, 0, sizeof(ee));
+    ee.data.fd = fd;
+    ee.events = EPOLLIN;
+
+    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, fd, &ee) < 0)
+    {
+        DEBUG << "failed to add file descriptor to epoll" << std::endl;
+        return BUSYBEE_POLLFAILED;
+    }
+
+    m_external = fd;
+    return BUSYBEE_SUCCESS;
+}
+#endif
 
 #ifdef BUSYBEE_MULTITHREADED
 bool
@@ -759,6 +780,14 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
             continue;
         }
 #endif // BUSYBEE_ACCEPT
+
+#ifdef BUSYBEE_ST
+        if (ee.data.fd == m_external)
+        {
+            DEBUG << "received events for externalfd" << std::endl;
+            return BUSYBEE_EXTERNAL;
+        }
+#endif
 
         // Get the channel object
         DEBUG << "processing fd=" << ee.data.fd << " as communication channel" << std::endl;

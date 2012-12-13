@@ -61,6 +61,9 @@ class busybee_st
         void set_timeout(int timeout);
 
     public:
+        busybee_returncode set_external_fd(int fd);
+
+    public:
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(uint64_t* server_id,
@@ -89,6 +92,7 @@ class busybee_st
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
         int m_timeout;
+        int m_external;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
 
