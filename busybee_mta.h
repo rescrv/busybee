@@ -114,6 +114,7 @@ class busybee_mta
         po6::threads::mutex m_recv_lock;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
+        po6::io::fd m_eventfd;
         po6::threads::mutex m_pause_lock;
         po6::threads::cond m_pause_all_paused;
         po6::threads::cond m_pause_may_unpause;

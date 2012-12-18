@@ -379,6 +379,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_recv_lock()
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
+    , m_eventfd(eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE))
     , m_pause_lock()
     , m_pause_all_paused(&m_pause_lock)
     , m_pause_may_unpause(&m_pause_lock)
@@ -389,7 +390,13 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
 {
     po6::threads::mutex::hold holdr(&m_recv_lock);
     po6::threads::mutex::hold holdp(&m_pause_lock);
+
     if (m_epoll.get() < 0)
+    {
+        throw po6::error(errno);
+    }
+
+    if (m_eventfd.get() < 0)
     {
         throw po6::error(errno);
     }
@@ -404,6 +411,14 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     ee.events = EPOLLIN;
 
     if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_listen.get(), &ee) < 0)
+    {
+        throw po6::error(errno);
+    }
+
+    ee.data.fd = m_eventfd.get();
+    ee.events = EPOLLIN;
+
+    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_eventfd.get(), &ee) < 0)
     {
         throw po6::error(errno);
     }
@@ -515,6 +530,7 @@ CLASSNAME :: pause()
 
     while (m_pause_num < m_pause_count)
     {
+        DEBUG << "paused " << m_pause_num << "/" << m_pause_count << std::endl;
         m_pause_all_paused.wait();
     }
 
@@ -775,13 +791,11 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         DEBUG << "received events from the syscall" << std::endl;
 
 #ifdef BUSYBEE_MULTITHREADED
-        //X XXX
-#if 0
-        if (fd == m_eventfd.get())
+        if (ee.data.fd == m_eventfd.get())
         {
             DEBUG << "received events for eventfd" << std::endl;
 
-            if ((events & EPOLLIN))
+            if ((ee.events & EPOLLIN))
             {
                 DEBUG << "event is EPOLLIN" << std::endl;
                 char buf[8];
@@ -791,7 +805,6 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
             continue;
         }
-#endif
 #endif // BUSYBEE_MULTITHREADED
 
 #ifdef BUSYBEE_ACCEPT
@@ -891,12 +904,9 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 void
 CLASSNAME :: up_the_semaphore()
 {
-    // XXX
-#if 0
     uint64_t num = m_pause_count;
     ssize_t ret = m_eventfd.write(&num, sizeof(num));
     assert(ret == sizeof(num));
-#endif
 }
 #endif // BUSYBEE_MULTITHREADED
 
