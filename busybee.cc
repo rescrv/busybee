@@ -934,6 +934,7 @@ CLASSNAME :: get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag)
             return BUSYBEE_DISRUPTED;
         }
 
+        DEBUG << "mapping for " << server_id << " is " << dst << std::endl;
         po6::net::socket soc(dst.address.family(), SOCK_STREAM, IPPROTO_TCP);
         soc.connect(dst);
         DEBUG << "establishing new connection to " << dst << " fd=" << soc.get() << std::endl;
