@@ -43,6 +43,7 @@ operator << (std::ostream& lhs, busybee_returncode rhs)
         stringify(BUSYBEE_DISRUPTED);
         stringify(BUSYBEE_ADDFDFAIL);
         stringify(BUSYBEE_TIMEOUT);
+        stringify(BUSYBEE_EXTERNAL);
         default:
             lhs << "unknown returncode";
     }
