@@ -1335,6 +1335,7 @@ CLASSNAME :: work_recv(channel* chan, bool* need_close, bool* quiet)
                     }
                     else
                     {
+                        DEBUG << "received new message " << chan->recv_partial_msg->hex() << std::endl;
                         recv_message* tmp = new recv_message(chan->recv_queue, chan->id, chan->recv_partial_msg);
                         *chan->recv_end = tmp;
                         chan->recv_end = &tmp->next;
