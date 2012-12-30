@@ -47,11 +47,6 @@
 class busybee_sta
 {
     public:
-        // Discover the first IP on a local interface that is not "lo".
-        static bool discover(po6::net::ipaddr* ip);
-        static uint64_t generate_id();
-
-    public:
         busybee_sta(busybee_mapper* mapper,
                     const po6::net::location& bind_to,
                     uint64_t server_id);

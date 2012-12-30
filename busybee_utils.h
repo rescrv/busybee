@@ -25,59 +25,15 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// POSIX
-#include <ifaddrs.h>
+#ifndef busybee_h_
+#define busybee_h_
 
 // po6
-#include <po6/net/location.h>
-
-// e
-#include <e/guard.h>
-#include <e/timer.h>
-
-// BusyBee
-#include "busybee_utils.h"
+#include <po6/net/ipaddr.h>
 
 bool
-busybee_discover(po6::net::ipaddr* ip)
-{
-    struct ifaddrs* ifa = NULL;
-
-    if (getifaddrs(&ifa) < 0 || !ifa)
-    {
-        return false;
-    }
-
-    e::guard g = e::makeguard(freeifaddrs, ifa);
-    g.use_variable();
-
-    for (struct ifaddrs* ifap = ifa; ifap; ifap = ifap->ifa_next)
-    {
-        if (strncmp(ifap->ifa_name, "lo", 2) == 0)
-        {
-            continue;
-        }
-
-        if (ifap->ifa_addr->sa_family == AF_INET)
-        {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in));
-            *ip = loc.address;
-            return true;
-        }
-        else if (ifap->ifa_addr->sa_family == AF_INET6)
-        {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in6));
-            *ip = loc.address;
-            return true;
-        }
-    }
-
-    errno = 0;
-    return false;
-}
-
+busybee_discover(po6::net::ipaddr* ip);
 uint64_t
-busybee_generate_id()
-{
-    return e::time(); // XXX weak!
-}
+busybee_generate_id();
+
+#endif // busybee_h_

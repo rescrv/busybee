@@ -25,59 +25,33 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// POSIX
-#include <ifaddrs.h>
-
-// po6
-#include <po6/net/location.h>
-
-// e
-#include <e/guard.h>
-#include <e/timer.h>
-
 // BusyBee
-#include "busybee_utils.h"
+#include "busybee_returncode.h"
 
-bool
-busybee_discover(po6::net::ipaddr* ip)
+#define str(x) #x
+#define xstr(x) str(x)
+#define stringify(x) case (x): lhs << xstr(x); break
+
+std::ostream&
+operator << (std::ostream& lhs, busybee_returncode rhs)
 {
-    struct ifaddrs* ifa = NULL;
-
-    if (getifaddrs(&ifa) < 0 || !ifa)
+    switch (rhs)
     {
-        return false;
+        stringify(BUSYBEE_SUCCESS);
+        stringify(BUSYBEE_SHUTDOWN);
+        stringify(BUSYBEE_POLLFAILED);
+        stringify(BUSYBEE_DISRUPTED);
+        stringify(BUSYBEE_ADDFDFAIL);
+        stringify(BUSYBEE_TIMEOUT);
+        stringify(BUSYBEE_EXTERNAL);
+        stringify(BUSYBEE_INTERRUPTED);
+        default:
+            lhs << "unknown returncode";
     }
 
-    e::guard g = e::makeguard(freeifaddrs, ifa);
-    g.use_variable();
-
-    for (struct ifaddrs* ifap = ifa; ifap; ifap = ifap->ifa_next)
-    {
-        if (strncmp(ifap->ifa_name, "lo", 2) == 0)
-        {
-            continue;
-        }
-
-        if (ifap->ifa_addr->sa_family == AF_INET)
-        {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in));
-            *ip = loc.address;
-            return true;
-        }
-        else if (ifap->ifa_addr->sa_family == AF_INET6)
-        {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in6));
-            *ip = loc.address;
-            return true;
-        }
-    }
-
-    errno = 0;
-    return false;
+    return lhs;
 }
 
-uint64_t
-busybee_generate_id()
-{
-    return e::time(); // XXX weak!
-}
+#undef stringify
+#undef xstr
+#undef str

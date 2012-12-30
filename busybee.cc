@@ -38,7 +38,6 @@
 #define __STDC_LIMIT_MACROS
 
 // POSIX
-#include <ifaddrs.h>
 #include <sys/types.h>
 #include <poll.h>
 
@@ -60,6 +59,7 @@
 
 // BusyBee
 #include "busybee_constants.h"
+#include "busybee_utils.h"
 
 // BusyBee Feature Declaration
 #ifdef BUSYBEE_MTA
@@ -318,50 +318,6 @@ CLASSNAME :: channel :: reset(uint64_t new_tag, po6::net::socket* dst)
 }
 
 ///////////////////////////////// BusyBee Class ////////////////////////////////
-
-bool
-CLASSNAME :: discover(po6::net::ipaddr* ip)
-{
-    struct ifaddrs* ifa = NULL;
-
-    if (getifaddrs(&ifa) < 0 || !ifa)
-    {
-        return false;
-    }
-
-    e::guard g = e::makeguard(freeifaddrs, ifa);
-    g.use_variable();
-
-    for (struct ifaddrs* ifap = ifa; ifap; ifap = ifap->ifa_next)
-    {
-        if (strncmp(ifap->ifa_name, "lo", 2) == 0)
-        {
-            continue;
-        }
-
-        if (ifap->ifa_addr->sa_family == AF_INET)
-        {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in));
-            *ip = loc.address;
-            return true;
-        }
-        else if (ifap->ifa_addr->sa_family == AF_INET6)
-        {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in6));
-            *ip = loc.address;
-            return true;
-        }
-    }
-
-    errno = 0;
-    return false;
-}
-
-uint64_t
-CLASSNAME :: generate_id()
-{
-    return e::time(); // XXX weak!
-}
 
 #ifdef BUSYBEE_MTA
 busybee_mta :: busybee_mta(busybee_mapper* mapper,
