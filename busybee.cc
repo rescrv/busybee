@@ -38,6 +38,7 @@
 #define __STDC_LIMIT_MACROS
 
 // POSIX
+#include <signal.h>
 #include <sys/types.h>
 #include <poll.h>
 
@@ -335,6 +336,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_recv_lock()
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
+    , m_sigmask()
     , m_eventfd(eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE))
     , m_pause_lock()
     , m_pause_all_paused(&m_pause_lock)
@@ -384,6 +386,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
         m_channels[i].tag = m_channels_sz + i;
     }
 
+    sigemptyset(&m_sigmask);
     DEBUG << "initialized busybee_mta instance at " << this << std::endl;
 }
 #endif // mta
@@ -402,6 +405,7 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
     , m_timeout(-1)
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
+    , m_sigmask()
 {
     if (m_epoll.get() < 0)
     {
@@ -427,6 +431,7 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
         m_channels[i].tag = m_channels_sz + i;
     }
 
+    sigemptyset(&m_sigmask);
     DEBUG << "initialized busybee_sta instance at " << this << std::endl;
 }
 #endif // sta
@@ -444,6 +449,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     , m_external(-1)
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
+    , m_sigmask()
 {
     if (m_epoll.get() < 0)
     {
@@ -455,6 +461,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
         m_channels[i].tag = m_channels_sz + i;
     }
 
+    sigemptyset(&m_sigmask);
     DEBUG << "initialized busybee_st instance at " << this << std::endl;
 }
 #endif // st
@@ -514,6 +521,18 @@ void
 CLASSNAME :: set_timeout(int timeout)
 {
     m_timeout = timeout;
+}
+
+void
+CLASSNAME :: set_ignore_signals()
+{
+    sigfillset(&m_sigmask);
+}
+
+void
+CLASSNAME :: unset_ignore_signals()
+{
+    sigemptyset(&m_sigmask);
 }
 
 #ifdef BUSYBEE_ST
@@ -726,21 +745,30 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         epoll_event ee;
         memset(&ee, 0, sizeof(ee));
 
-        if ((status = epoll_wait(m_epoll.get(), &ee, 1, m_timeout)) <= 0)
+        if ((status = epoll_pwait(m_epoll.get(), &ee, 1, m_timeout, &m_sigmask)) <= 0)
         {
             if (status < 0 &&
                 errno != EAGAIN &&
                 errno != EINTR &&
                 errno != EWOULDBLOCK)
             {
+                DEBUG << "syscall failed" << std::endl;
                 return BUSYBEE_POLLFAILED;
+            }
+
+            if (status < 0 && errno == EINTR)
+            {
+                DEBUG << "syscall interrupted" << std::endl;
+                return BUSYBEE_INTERRUPTED;
             }
 
             if (status == 0 && m_timeout >= 0)
             {
+                DEBUG << "syscall timed-out" << std::endl;
                 return BUSYBEE_TIMEOUT;
             }
 
+            DEBUG << "syscall EAGAIN or EWOULDBLOCK; continue" << std::endl;
             continue;
         }
 
@@ -1094,6 +1122,10 @@ CLASSNAME :: work_recv(channel* chan, bool* need_close, bool* quiet)
             *quiet = false;
             return;
         }
+        else if (rem < 0 && errno == EINTR)
+        {
+            continue;
+        }
         else if (rem < 0)
         {
             DEBUG << "received EINTR, EAGAIN, or EWOULDBLOCK; our work here is done" << std::endl;
@@ -1330,6 +1362,10 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
             *need_close = true;
             *quiet = false;
             return;
+        }
+        else if (ret <= 0 && errno == EINTR)
+        {
+            continue;
         }
         else if (ret <= 0)
         {

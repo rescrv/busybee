@@ -55,6 +55,8 @@ class busybee_sta
     public:
         void set_id(uint64_t server_id);
         void set_timeout(int timeout);
+        void set_ignore_signals();
+        void unset_ignore_signals();
 
     public:
         int poll_fd();
@@ -91,6 +93,7 @@ class busybee_sta
         int m_timeout;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
+        sigset_t m_sigmask;
 
     private:
         busybee_sta(const busybee_sta&);

@@ -40,7 +40,8 @@ enum busybee_returncode
     BUSYBEE_DISRUPTED   = 4611,
     BUSYBEE_ADDFDFAIL   = 4612,
     BUSYBEE_TIMEOUT     = 4613,
-    BUSYBEE_EXTERNAL    = 4614
+    BUSYBEE_EXTERNAL    = 4614,
+    BUSYBEE_INTERRUPTED = 4615
 };
 
 std::ostream&

@@ -68,6 +68,8 @@ class busybee_mta
     public:
         void set_id(uint64_t server_id);
         void set_timeout(int timeout); // call while paused
+        void set_ignore_signals();
+        void unset_ignore_signals();
 
     public:
         bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
@@ -109,6 +111,7 @@ class busybee_mta
         po6::threads::mutex m_recv_lock;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
+        sigset_t m_sigmask;
         po6::io::fd m_eventfd;
         po6::threads::mutex m_pause_lock;
         po6::threads::cond m_pause_all_paused;

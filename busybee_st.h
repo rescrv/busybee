@@ -54,6 +54,8 @@ class busybee_st
     public:
         void set_id(uint64_t server_id);
         void set_timeout(int timeout);
+        void set_ignore_signals();
+        void unset_ignore_signals();
 
     public:
         busybee_returncode set_external_fd(int fd);
@@ -92,6 +94,7 @@ class busybee_st
         int m_external;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
+        sigset_t m_sigmask;
 
     private:
         busybee_st(const busybee_st&);
