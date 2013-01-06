@@ -64,6 +64,9 @@ class busybee_mta
         void pause();
         // Cause all threads to leave the barrier initiated by "pause".
         void unpause();
+        // Wakeup threads.  Use when "deliver" is called by a thread that will
+        // never call "recv".
+        void wake_one();
 
     public:
         void set_id(uint64_t server_id);

@@ -508,6 +508,14 @@ CLASSNAME :: unpause()
     m_pause_paused = false;
     m_pause_may_unpause.broadcast();
 }
+
+void
+CLASSNAME :: wake_one()
+{
+    uint64_t num = 1;
+    ssize_t ret = m_eventfd.write(&num, sizeof(num));
+    assert(ret == sizeof(num));
+}
 #endif // BUSYBEE_MULTITHREADED
 
 void
@@ -559,12 +567,14 @@ CLASSNAME :: set_external_fd(int fd)
 bool
 CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
 {
+    DEBUG << "processing deliver from " << server_id << " with message " << msg->hex() << std::endl;
     recv_message* m(new recv_message(NULL, server_id, msg));
 #ifdef BUSYBEE_MULTITHREADED
     po6::threads::mutex::hold hold(&m_recv_lock);
 #endif // BUSYBEE_MULTITHREADED
     *m_recv_end = m;
     m_recv_end = &(m->next);
+    DEBUG << "done with deliver" << std::endl;
     return true;
 }
 #endif // BUSYBEE_MULTITHREADED
@@ -682,7 +692,8 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #ifdef BUSYBEE_MULTITHREADED
         if (need_to_pause)
         {
-            DEBUG << "need to pause" << std::endl;
+            bool did_we_pause = false;
+            DEBUG << "may need to pause" << std::endl;
             po6::threads::mutex::hold hold(&m_pause_lock);
 
             while (m_pause_paused && !m_shutdown)
@@ -695,11 +706,22 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
                     m_pause_all_paused.signal();
                 }
 
+                did_we_pause = true;
                 m_pause_may_unpause.wait();
                 --m_pause_num;
             }
 
-            DEBUG << "unpaused" << std::endl;
+            if (did_we_pause)
+            {
+                DEBUG << "unpaused" << std::endl;
+            }
+            else
+            {
+                DEBUG << "did not pause" << std::endl;
+                m_recv_lock.lock();
+                DEBUG << "queue: " << m_recv_queue;
+                m_recv_lock.unlock();
+            }
         }
 
         if (m_shutdown)
