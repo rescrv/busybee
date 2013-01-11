@@ -641,7 +641,7 @@ CLASSNAME :: send(uint64_t server_id,
         return BUSYBEE_DISRUPTED;
     }
 
-    bool empty = chan->send_end == &chan->send_queue;
+    bool empty = !chan->send_queue;
     send_message* tmp = new send_message(chan->send_queue, msg);
     *chan->send_end = tmp;
     chan->send_end = &tmp->next;
@@ -746,14 +746,14 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
             recv_message* m = m_recv_queue;
 
-            if (m_recv_end == &m->next)
+            if (m_recv_queue->next)
             {
-                m_recv_queue = NULL;
-                m_recv_end = &m_recv_queue;
+                m_recv_queue = m_recv_queue->next;
             }
             else
             {
-                m_recv_queue = m->next;
+                m_recv_queue = NULL;
+                m_recv_end = &m_recv_queue;
             }
 
             *id = m->id;
@@ -1346,14 +1346,14 @@ CLASSNAME :: work_recv(channel* chan, bool* need_close, bool* quiet)
                     else
                     {
                         DEBUG << "received new message " << chan->recv_partial_msg->hex() << std::endl;
-                        recv_message* tmp = new recv_message(chan->recv_queue, chan->id, chan->recv_partial_msg);
+                        recv_message* tmp = new recv_message(NULL, chan->id, chan->recv_partial_msg);
                         *chan->recv_end = tmp;
                         chan->recv_end = &tmp->next;
                     }
 
                     chan->recv_partial_msg.reset();
                     chan->flags = 0;
-                } // if (chan->recv_partial_msg->size() == chan->recv_partial_msg->capacity())
+                }
             }
         }
     }
@@ -1399,20 +1399,21 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
 
             if (chan->send_progress.empty())
             {
-                send_message* msg = chan->send_queue;
+                assert(chan->send_queue);
 
-                if (chan->send_end == &msg->next)
+                if (chan->send_queue->next)
+                {
+                    send_message* tmp = chan->send_queue;
+                    chan->send_queue = chan->send_queue->next;
+                    chan->send_progress = chan->send_queue->msg->as_slice();
+                    delete tmp;
+                }
+                else
                 {
                     chan->send_queue = NULL;
                     chan->send_end = &chan->send_queue;
                 }
-                else
-                {
-                    chan->send_queue = msg->next;
-                    chan->send_progress = chan->send_queue->msg->as_slice();
-                }
 
-                delete msg;
             }
         }
     }
@@ -1425,7 +1426,7 @@ CLASSNAME :: send_fin(channel* chan)
 {
     std::auto_ptr<e::buffer> msg(e::buffer::create(sizeof(uint32_t)));
     msg->pack_at(0) << static_cast<uint32_t>(BBMSG_FIN | sizeof(uint32_t));
-    bool empty = chan->send_end == &chan->send_queue;
+    bool empty = !chan->send_queue;
     send_message* tmp = new send_message(chan->send_queue, msg);
     *chan->send_end = tmp;
     chan->send_end = &tmp->next;
@@ -1446,7 +1447,7 @@ CLASSNAME :: send_ack(channel* chan)
 {
     std::auto_ptr<e::buffer> msg(e::buffer::create(sizeof(uint32_t)));
     msg->pack_at(0) << static_cast<uint32_t>(BBMSG_ACK | sizeof(uint32_t));
-    bool empty = chan->send_end == &chan->send_queue;
+    bool empty = !chan->send_queue;
     send_message* tmp = new send_message(chan->send_queue, msg);
     *chan->send_end = tmp;
     chan->send_end = &tmp->next;
