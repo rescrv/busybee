@@ -308,7 +308,7 @@ CLASSNAME :: channel :: reset(uint64_t new_tag)
     }
 
     send_end = &send_queue;
-    send_progress = e::slice("", 0);
+    send_progress = e::slice(NULL, 0);
 }
 
 void
@@ -642,7 +642,7 @@ CLASSNAME :: send(uint64_t server_id,
     }
 
     bool empty = !chan->send_queue;
-    send_message* tmp = new send_message(chan->send_queue, msg);
+    send_message* tmp = new send_message(NULL, msg);
     *chan->send_end = tmp;
     chan->send_end = &tmp->next;
 
@@ -1412,6 +1412,7 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
                 {
                     chan->send_queue = NULL;
                     chan->send_end = &chan->send_queue;
+                    chan->send_progress = e::slice(NULL, 0);
                 }
 
             }
@@ -1427,7 +1428,7 @@ CLASSNAME :: send_fin(channel* chan)
     std::auto_ptr<e::buffer> msg(e::buffer::create(sizeof(uint32_t)));
     msg->pack_at(0) << static_cast<uint32_t>(BBMSG_FIN | sizeof(uint32_t));
     bool empty = !chan->send_queue;
-    send_message* tmp = new send_message(chan->send_queue, msg);
+    send_message* tmp = new send_message(NULL, msg);
     *chan->send_end = tmp;
     chan->send_end = &tmp->next;
 
@@ -1448,7 +1449,7 @@ CLASSNAME :: send_ack(channel* chan)
     std::auto_ptr<e::buffer> msg(e::buffer::create(sizeof(uint32_t)));
     msg->pack_at(0) << static_cast<uint32_t>(BBMSG_ACK | sizeof(uint32_t));
     bool empty = !chan->send_queue;
-    send_message* tmp = new send_message(chan->send_queue, msg);
+    send_message* tmp = new send_message(NULL, msg);
     *chan->send_end = tmp;
     chan->send_end = &tmp->next;
 
