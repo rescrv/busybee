@@ -1410,6 +1410,7 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
                 }
                 else
                 {
+                    delete chan->send_queue;
                     chan->send_queue = NULL;
                     chan->send_end = &chan->send_queue;
                     chan->send_progress = e::slice(NULL, 0);
