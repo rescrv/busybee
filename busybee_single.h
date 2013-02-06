@@ -58,8 +58,13 @@ class busybee_single
         uint64_t token() { return m_token; }
 
     public:
+#ifdef _MSC_VER
         busybee_returncode send(std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(std::auto_ptr<e::buffer>* msg);
+#else
+        busybee_returncode send(std::shared_ptr<e::buffer> msg);
+        busybee_returncode recv(std::shared_ptr<e::buffer>* msg);
+#endif
 
     private:
         void reset();
@@ -71,7 +76,11 @@ class busybee_single
         po6::net::socket m_connection;
         uint32_t m_recv_partial_header_sz;
         uint8_t m_recv_partial_header[sizeof(uint32_t)];
+#ifdef _MSC_VER
+        std::shared_ptr<e::buffer> m_recv_partial_msg;
+#else
         std::auto_ptr<e::buffer> m_recv_partial_msg;
+#endif
         uint32_t m_flags;
         uint64_t m_token;
 

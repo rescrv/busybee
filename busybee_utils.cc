@@ -26,7 +26,9 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 // POSIX
+#ifndef _MSC_VER
 #include <ifaddrs.h>
+#endif
 
 // po6
 #include <po6/net/location.h>
@@ -41,6 +43,7 @@
 bool
 busybee_discover(po6::net::ipaddr* ip)
 {
+#ifndef _MSC_VER
     struct ifaddrs* ifa = NULL;
 
     if (getifaddrs(&ifa) < 0 || !ifa)
@@ -73,6 +76,7 @@ busybee_discover(po6::net::ipaddr* ip)
     }
 
     errno = 0;
+#endif
     return false;
 }
 
