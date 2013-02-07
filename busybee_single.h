@@ -59,11 +59,11 @@ class busybee_single
 
     public:
 #ifdef _MSC_VER
-        busybee_returncode send(std::auto_ptr<e::buffer> msg);
-        busybee_returncode recv(std::auto_ptr<e::buffer>* msg);
-#else
         busybee_returncode send(std::shared_ptr<e::buffer> msg);
         busybee_returncode recv(std::shared_ptr<e::buffer>* msg);
+#else
+        busybee_returncode send(std::auto_ptr<e::buffer> msg);
+        busybee_returncode recv(std::auto_ptr<e::buffer>* msg);
 #endif
 
     private:
