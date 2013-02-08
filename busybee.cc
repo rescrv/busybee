@@ -40,11 +40,21 @@
 // POSIX
 #include <signal.h>
 #include <sys/types.h>
+#ifndef _MSC_VER
 #include <poll.h>
+#endif
+
+//Windows
+#ifdef _MSC_VER
+#include <Winsock2.h>
+#include <ws2tcpip.h>
+#include <mstcpip.h>
 
 // Linux
+#else
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#endif
 
 // po6
 #include <po6/net/socket.h>
@@ -125,6 +135,10 @@
 
 #define _CONCAT(X, Y) X ## Y
 #define CONCAT(X, Y) _CONCAT(X, Y)
+
+#ifdef min
+#undef min
+#endif
 
 #define CLASSNAME CONCAT(busybee_, BUSYBEE_TYPE)
 
@@ -439,29 +453,45 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
 #ifdef BUSYBEE_ST
 busybee_st :: busybee_st(busybee_mapper* mapper,
                          uint64_t server_id)
+#ifdef _MSC_VER
+	: m_epoll() //this is the master struct fd_set
+	, m_channels_sz(1024) //XXX: find out how to get the right size in windows.
+#else
     : m_epoll(epoll_create(64))
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
+#endif
     , m_channels(new channel[m_channels_sz])
     , m_server2channel(10)
     , m_mapper(mapper)
     , m_server_id(server_id)
-    , m_timeout(-1)
+	, m_timeout(-1)
+#ifdef _MSC_VER
+	, m_external(NULL)
+#else
     , m_external(-1)
-    , m_recv_queue(NULL)
+#endif
+	, m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
+#ifndef _MSC_VER
     , m_sigmask()
+#endif
 {
+
+#ifndef _MSC_VER
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
     }
+#endif
 
     for (size_t i = 0; i < m_channels_sz; ++i)
     {
         m_channels[i].tag = m_channels_sz + i;
     }
 
+#ifndef _MSC_VER
     sigemptyset(&m_sigmask);
+#endif
     DEBUG << "initialized busybee_st instance at " << this << std::endl;
 }
 #endif // st
@@ -531,6 +561,7 @@ CLASSNAME :: set_timeout(int timeout)
     m_timeout = timeout;
 }
 
+#ifndef _MSC_VER
 void
 CLASSNAME :: set_ignore_signals()
 {
@@ -542,8 +573,10 @@ CLASSNAME :: unset_ignore_signals()
 {
     sigemptyset(&m_sigmask);
 }
+#endif
 
 #ifdef BUSYBEE_ST
+#ifndef _MSC_VER
 busybee_returncode
 CLASSNAME :: set_external_fd(int fd)
 {
@@ -561,6 +594,17 @@ CLASSNAME :: set_external_fd(int fd)
     m_external = fd;
     return BUSYBEE_SUCCESS;
 }
+#else
+busybee_returncode
+CLASSNAME :: set_external_fd(struct fd_set* fd)
+{
+	// XXX: This is not portable.  It relies on the windows implementation
+	// of struct fd_set.
+
+    m_external = fd;
+    return BUSYBEE_SUCCESS;
+}
+#endif
 #endif
 
 #ifdef BUSYBEE_MULTITHREADED
@@ -579,11 +623,19 @@ CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
 }
 #endif // BUSYBEE_MULTITHREADED
 
+#ifndef _MSC_VER
 int
 CLASSNAME :: poll_fd()
 {
     return m_epoll.get();
 }
+#else
+struct fd_set*
+CLASSNAME :: poll_fd()
+{
+	return &m_epoll;
+}
+#endif
 
 busybee_returncode
 CLASSNAME :: drop(uint64_t server_id)
@@ -764,27 +816,88 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
         DEBUG << "making syscall to poll for events" << std::endl;
         int status;
+#ifdef _MSC_VER
+		fd_set ee;
+		fd_set ff;
+		memmove(&ee, &m_epoll, sizeof(fd_set));
+
+		if(m_external)
+		{
+			int i;
+
+			for(i = 0; i < m_external->fd_count; ++i)
+			{
+				FD_SET(m_external->fd_array[i], &m_epoll);
+			}
+		}
+
+		memmove(&ff, &ee, sizeof(fd_set));
+
+		DEBUG << "m_timeout = " << m_timeout << std::endl;
+		
+		if(m_timeout < 0)
+		{
+			status = select(1, &ee, NULL, &ff, NULL);
+		}
+
+		else
+		{
+			struct timeval ts;
+			ts.tv_sec = (m_timeout / 1000);
+			ts.tv_usec = ((m_timeout % 1000) * 1000);
+			status = select(1, &ee, NULL, &ff, &ts);
+		}
+
+		if(status <= 0)
+		{
+
+			// The fds are always in a contiguous block, so the
+			// last part of the array is the full set of external
+			// FDs.  Internally, the system uses fd_count to know
+			// where to stop looking, so we can just subtract from it.
+			// This ensures that each time we call select, we have the most
+			// up to date set of fds from replicant.
+			if(m_external)
+				m_epoll.fd_count -= m_external->fd_count;
+#else
         epoll_event ee;
         memset(&ee, 0, sizeof(ee));
 
         if ((status = epoll_pwait(m_epoll.get(), &ee, 1, m_timeout, &m_sigmask)) <= 0)
         {
+#endif
+			
+#ifdef _MSC_VER
+            errno = WSAGetLastError();
+
+            if (status < 0 &&
+                errno != WSAEINTR &&
+                errno != WSAEWOULDBLOCK)
+#else
             if (status < 0 &&
                 errno != EAGAIN &&
                 errno != EINTR &&
                 errno != EWOULDBLOCK)
+#endif
             {
                 DEBUG << "syscall failed" << std::endl;
                 return BUSYBEE_POLLFAILED;
             }
 
+#ifdef _MSC_VER
+            if (status < 0 && errno == WSAEINTR)
+#else
             if (status < 0 && errno == EINTR)
+#endif
             {
                 DEBUG << "syscall interrupted" << std::endl;
                 return BUSYBEE_INTERRUPTED;
             }
-
+#ifdef _MSC_VER
+            if (status == 0)
+#else
             if (status == 0 && m_timeout >= 0)
+#endif
             {
                 DEBUG << "syscall timed-out" << std::endl;
                 return BUSYBEE_TIMEOUT;
@@ -829,16 +942,37 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #endif // BUSYBEE_ACCEPT
 
 #ifdef BUSYBEE_ST
+#ifdef _MSC_VER
+		if(m_external)
+		{
+			int i;
+
+			for(i = 0; i < m_external->fd_count; ++i)
+			{
+				if(FD_ISSET(m_external->fd_array[i], &ee))
+				{
+					DEBUG << "received events for externalfd" << std::endl;
+				}
+			}
+		}
+#else
         if (ee.data.fd == m_external)
         {
             DEBUG << "received events for externalfd" << std::endl;
             return BUSYBEE_EXTERNAL;
         }
-#endif
+#endif //_MSC_VER
+#endif // BUSYBEE_ST
 
+#ifdef _MSC_VER
+		// Get the channel object
+		DEBUG << "processing fd=" << (ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0]) << " as communication channel" << std::endl;
+		channel& chan(m_channels[(size_t)(ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0])]);
+#else
         // Get the channel object
         DEBUG << "processing fd=" << ee.data.fd << " as communication channel" << std::endl;
         channel& chan(m_channels[ee.data.fd]);
+#endif // _MSC_VER
 
 #ifdef BUSYBEE_MULTITHREADED
         po6::threads::mutex::hold hold(&chan.mtx);
@@ -853,6 +987,8 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         bool need_close = false;
         bool quiet = true;
 
+#ifndef _MSC_VER
+		//For now, windows uses only synchronous sends.
         if ((ee.events & EPOLLOUT))
         {
             DEBUG << "event is EPOLLOUT" << std::endl;
@@ -862,9 +998,13 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
                   << "need_close=" << (need_close ? "true" : "false") << " "
                   << "quiet=" << (quiet ? "true" : "false") << std::endl;
         }
+#endif // _MSC_VER
 
-
+#ifdef _MSC_VER
+		if(ee.fd_count > 0)
+#else
         if ((ee.events & EPOLLIN))
+#endif // _MSC_VER
         {
             DEBUG << "event is EPOLLIN" << std::endl;
             work_recv(&chan, &need_close, &quiet);
@@ -874,7 +1014,11 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
                   << "quiet=" << (quiet ? "true" : "false") << std::endl;
         }
 
+#ifdef _MSC_VER
+		if(ff.fd_count > 0)
+#else
         if ((ee.events & EPOLLERR) || (ee.events & EPOLLHUP))
+#endif
         {
             need_close = true;
             quiet = false;
@@ -984,6 +1128,9 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_ta
 #endif // HAVE_SO_NOSIGPIPE
     chan->soc.set_tcp_nodelay();
     chan->state = channel::CONNECTED;
+#ifdef _MSC_VER
+	FD_SET(chan->soc.get(),&m_epoll);
+#else
     epoll_event ee;
     memset(&ee, 0, sizeof(ee));
     ee.data.fd = chan->soc.get();
@@ -994,6 +1141,7 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_ta
         DEBUG << "failed to add file descriptor to epoll" << std::endl;
         return false;
     }
+#endif
 
     char buf[sizeof(uint32_t) + sizeof(uint64_t)];
     uint32_t sz = (sizeof(uint32_t) + sizeof(uint64_t)) | BBMSG_IDENTIFY;
@@ -1013,7 +1161,11 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_ta
     pfd.events = POLLIN;
     pfd.revents = 0;
 
-    if (poll(&pfd, 1, 0) > 0)
+#ifdef _MSC_VER
+    if (WSAPoll(&pfd, 1, 0) > 0)
+#else
+	if (poll(&pfd, 1, 0) > 0)
+#endif
     {
         DEBUG << "there's already data available for reading, reading it now" << std::endl;
         bool need_close = false;
@@ -1137,7 +1289,13 @@ CLASSNAME :: work_recv(channel* chan, bool* need_close, bool* quiet)
         rem = chan->soc.recv(buf + chan->recv_partial_header_sz, IO_BLOCKSIZE - chan->recv_partial_header_sz, flags);
         DEBUG << "recv'd " << rem << " bytes" << std::endl;
 
+#ifdef _MSC_VER
+        errno = WSAGetLastError();
+
+        if (rem < 0 && errno != WSAEINTR && errno != WSAEWOULDBLOCK)
+#else
         if (rem < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+#endif
         {
             DEBUG << "fail:  received an error and it wasn't a kind one errno=" << errno << std::endl;
             *need_close = true;
@@ -1377,9 +1535,26 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
 #ifdef HAVE_MSG_NOSIGNAL
         flags |= MSG_NOSIGNAL;
 #endif // HAVE_MSG_NOSIGNAL
+#ifdef _MSC_VER
+		//XXX:  Windows is level triggered, so just send synchronously.
+		u_long mode = 0;
+		if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
+		{
+			*need_close = true;
+			*quiet = false;
+		}
+#endif
         ssize_t ret = chan->soc.send(chan->send_progress.data(), chan->send_progress.size(), flags);
-
-        if (ret < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+#ifdef _MSC_VER
+		mode = 1;
+		if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
+		{
+			*need_close = true;
+			*quiet = false;
+		}
+        errno = WSAGetLastError();
+#endif
+        if (ret < 0 && errno != WSAEINTR && errno != WSAEWOULDBLOCK)
         {
             *need_close = true;
             *quiet = false;
