@@ -1553,8 +1553,10 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
 			*quiet = false;
 		}
         errno = WSAGetLastError();
-#endif
         if (ret < 0 && errno != WSAEINTR && errno != WSAEWOULDBLOCK)
+#else
+        if (ret < 0 && errno != EINTR && errno != EWOULDBLOCK)
+#endif
         {
             *need_close = true;
             *quiet = false;
