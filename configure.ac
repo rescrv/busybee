@@ -3,7 +3,7 @@
 
 AC_PREREQ([2.66])
 AC_INIT([BusyBee], [0.2.dev], [escriva@cs.cornell.edu])
-AM_INIT_AUTOMAKE([foreign subdir-objects dist-bzip2 dist-lzma])
+AM_INIT_AUTOMAKE([foreign subdir-objects dist-bzip2])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 LT_PREREQ([2.2])
 LT_INIT
@@ -38,7 +38,7 @@ AC_EGREP_HEADER([SO_NOSIGPIPE],[sys/socket.h],AC_DEFINE([HAVE_SO_NOSIGPIPE],[1],
 
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
-AC_CHECK_FUNCS([memmove socket])
+AC_CHECK_FUNCS([memmove socket epoll_ctl kqueue clock_gettime mach_absolute_time])
 
 AC_CONFIG_FILES([Makefile
                  busybee.pc])
