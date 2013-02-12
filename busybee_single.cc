@@ -32,11 +32,13 @@
 #endif
 
 // POSIX
+#ifndef _MSC_VER
 #include <poll.h>
+#endif
 
 // e
 #include <e/endian.h>
-#include <e/timer.h>
+#include <e/time.h>
 
 // BusyBee
 #include "busybee_single.h"
@@ -58,7 +60,11 @@ busybee_single :: ~busybee_single() throw ()
 }
 
 busybee_returncode
+#ifdef _MSC_VER
+busybee_single :: send(std::shared_ptr<e::buffer> msg)
+#else
 busybee_single :: send(std::auto_ptr<e::buffer> msg)
+#endif
 {
     // Pack the size into the header
     *msg << static_cast<uint32_t>(msg->size());
@@ -94,7 +100,11 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
 }
 
 busybee_returncode
+#ifdef _MSC_VER
+busybee_single :: recv(std::shared_ptr<e::buffer>* msg)
+#else
 busybee_single :: recv(std::auto_ptr<e::buffer>* msg)
+#endif
 {
     while (true)
     {
@@ -122,7 +132,11 @@ busybee_single :: recv(std::auto_ptr<e::buffer>* msg)
         pfd.fd = m_connection.get();
         pfd.events = POLLIN;
         pfd.revents = 0;
+#ifdef _MSC_VER
+        int status = WSAPoll(&pfd, 1, m_timeout);
+#else
         int status = poll(&pfd, 1, m_timeout);
+#endif
 
         if (status < 0 && EINTR)
         {

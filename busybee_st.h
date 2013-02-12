@@ -54,14 +54,25 @@ class busybee_st
     public:
         void set_id(uint64_t server_id);
         void set_timeout(int timeout);
+#ifndef _MSC_VER
         void set_ignore_signals();
         void unset_ignore_signals();
+        void add_signals();
+#endif
 
     public:
+#ifdef _MSC_VER
+        busybee_returncode set_external_fd(struct fd_set* fd);
+#else
         busybee_returncode set_external_fd(int fd);
+#endif
 
     public:
+#ifndef _MSC_VER
         int poll_fd();
+#else
+		struct fd_set* poll_fd();
+#endif
         busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
@@ -74,6 +85,8 @@ class busybee_st
         class send_message;
 
     private:
+        int add_event(int fd, uint32_t events);
+        int wait_event(int* fd, uint32_t* events);
         busybee_returncode get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
         bool setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag);
         void set_mapping(uint64_t server_id, uint64_t chan_tag);
@@ -84,17 +97,31 @@ class busybee_st
         bool send_ack(channel* chan);
 
     private:
-        po6::io::fd m_epoll;
+#ifdef _MSC_VER
+        struct fd_set m_epoll;
+#else
+		po6::io::fd m_epoll;
+#endif
         size_t m_channels_sz;
         e::array_ptr<channel> m_channels;
-        e::lockfree_hash_map<uint64_t, uint64_t, e::hash_map_id> m_server2channel;
+	static uint64_t hash(const uint64_t& r)
+	{
+		return r;
+	}
+        e::lockfree_hash_map<uint64_t, uint64_t, hash> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
         int m_timeout;
-        int m_external;
+#ifdef _MSC_VER
+        struct fd_set* m_external;
+#else
+		int m_external;
+#endif
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
-        sigset_t m_sigmask;
+#ifndef _MSC_VER
+		sigset_t m_sigmask;
+#endif
 
     private:
         busybee_st(const busybee_st&);

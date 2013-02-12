@@ -8,5 +8,5 @@ Description: High performance messaging layer
 Version: @VERSION@
 
 Requires: libpo6 >= 0.2.3 libe >= 0.2.7
-Libs: -L${libdir}
+Libs: -L${libdir} -lbusybee
 Cflags: -I${includedir}

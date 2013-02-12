@@ -57,6 +57,7 @@ class busybee_sta
         void set_timeout(int timeout);
         void set_ignore_signals();
         void unset_ignore_signals();
+        void add_signals();
 
     public:
         int poll_fd();
@@ -76,6 +77,8 @@ class busybee_sta
         bool setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag);
         void set_mapping(uint64_t server_id, uint64_t chan_tag);
         void work_accept();
+        int add_event(int fd, uint32_t events);
+        int wait_event(int* fd, uint32_t* events);
         void work_close(channel* chan);
         void work_recv(channel* chan, bool* need_close, bool* quiet);
         void work_send(channel* chan, bool* need_close, bool* quiet);

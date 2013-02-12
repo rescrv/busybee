@@ -28,12 +28,25 @@
 #ifndef busybee_constants_h_
 #define busybee_constants_h_
 
+#ifndef __STDC_LIMIT_MACROS
 #define __STDC_LIMIT_MACROS
+#endif
 
 // C
 #include <stdint.h>
 
 #define BUSYBEE_HEADER_SIZE sizeof(uint32_t)
-#define BUSYBEE_MAX_MSG_SIZE (UINT32_MAX >> 2)
+#define BUSYBEE_MAX_MSG_SIZE UINT32_MAX
+
+#ifndef HAVE_EPOLL_CTL 
+enum epoll_events 
+{
+    EPOLLIN = 1,
+    EPOLLOUT = 2,
+    EPOLLET = 4,
+    EPOLLERR = 8,
+    EPOLLHUP = 16
+};
+#endif
 
 #endif // busybee_constants_h_
