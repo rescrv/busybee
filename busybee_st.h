@@ -57,6 +57,7 @@ class busybee_st
 #ifndef _MSC_VER
         void set_ignore_signals();
         void unset_ignore_signals();
+        void add_signals();
 #endif
 
     public:
@@ -84,6 +85,8 @@ class busybee_st
         class send_message;
 
     private:
+        int add_event(int fd, uint32_t events);
+        int wait_event(int* fd, uint32_t* events);
         busybee_returncode get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
         bool setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag);
         void set_mapping(uint64_t server_id, uint64_t chan_tag);

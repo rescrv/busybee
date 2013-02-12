@@ -35,7 +35,9 @@
 #define DEBUG if (0) std::cerr << __FILE__ << ":" << __LINE__ << " "
 #endif
 
+#ifndef __STDC_LIMIT_MACROS
 #define __STDC_LIMIT_MACROS
+#endif
 
 // POSIX
 #include <signal.h>
@@ -49,11 +51,16 @@
 #include <Winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
+#endif
 
 // Linux
-#else
+#ifdef HAVE_EPOLL_CTL
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#elif defined HAVE_KQUEUE 
+#include <sys/event.h>
+#else
+#error no_event
 #endif
 
 // po6
@@ -141,6 +148,12 @@
 #endif
 
 #define CLASSNAME CONCAT(busybee_, BUSYBEE_TYPE)
+
+#ifdef HAVE_EPOLL_CTL 
+#define EPOLL_CREATE(N) epoll_create(N)
+#elif HAVE_KQUEUE
+#define EPOLL_CREATE(N) kqueue()
+#endif
 
 // Some Constants
 #define IO_BLOCKSIZE 4096
@@ -339,7 +352,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
                            const po6::net::location& bind_to,
                            uint64_t server_id,
                            size_t num_threads)
-    : m_epoll(epoll_create(64))
+    : m_epoll(EPOLL_CREATE(64))
     , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
@@ -351,7 +364,9 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
     , m_sigmask()
-    , m_eventfd(eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE))
+    , m_pipebuf(new char[num_threads])
+    , m_eventfdread()
+    , m_eventfdwrite()
     , m_pause_lock()
     , m_pause_all_paused(&m_pause_lock)
     , m_pause_may_unpause(&m_pause_lock)
@@ -368,29 +383,29 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
         throw po6::error(errno);
     }
 
-    if (m_eventfd.get() < 0)
+    add_signals();
+
+    int eventfd[2];
+
+    if (pipe(eventfd) < 0)
     {
         throw po6::error(errno);
     }
+
+    m_eventfdread = eventfd[0];
+    m_eventfdwrite = eventfd[1];
 
     m_listen.set_reuseaddr();
     m_listen.bind(bind_to);
     m_listen.listen(m_channels_sz);
     m_listen.set_nonblocking();
-    epoll_event ee;
-    memset(&ee, 0, sizeof(ee));
-    ee.data.fd = m_listen.get();
-    ee.events = EPOLLIN;
 
-    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_listen.get(), &ee) < 0)
+    if (add_event(m_listen.get(), EPOLLIN) < 0)
     {
         throw po6::error(errno);
     }
 
-    ee.data.fd = m_eventfd.get();
-    ee.events = EPOLLIN;
-
-    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_eventfd.get(), &ee) < 0)
+    if (add_event(m_eventfdread.get(),EPOLLIN) < 0)
     {
         throw po6::error(errno);
     }
@@ -409,7 +424,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
 busybee_sta :: busybee_sta(busybee_mapper* mapper,
                            const po6::net::location& bind_to,
                            uint64_t server_id)
-    : m_epoll(epoll_create(64))
+    : m_epoll(EPOLL_CREATE(64))
     , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
@@ -426,16 +441,14 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
         throw po6::error(errno);
     }
 
+    add_signals();
+
     m_listen.set_reuseaddr();
     m_listen.bind(bind_to);
     m_listen.listen(m_channels_sz);
     m_listen.set_nonblocking();
-    epoll_event ee;
-    memset(&ee, 0, sizeof(ee));
-    ee.data.fd = m_listen.get();
-    ee.events = EPOLLIN;
 
-    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, m_listen.get(), &ee) < 0)
+    if (add_event(m_listen.get(), EPOLLIN) < 0)
     {
         throw po6::error(errno);
     }
@@ -457,7 +470,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
 	: m_epoll() //this is the master struct fd_set
 	, m_channels_sz(1024) //XXX: find out how to get the right size in windows.
 #else
-    : m_epoll(epoll_create(64))
+    : m_epoll(EPOLL_CREATE(64))
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
 #endif
     , m_channels(new channel[m_channels_sz])
@@ -484,6 +497,8 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     }
 #endif
 
+    add_signals();
+
     for (size_t i = 0; i < m_channels_sz; ++i)
     {
         m_channels[i].tag = m_channels_sz + i;
@@ -501,6 +516,23 @@ CLASSNAME :: ~CLASSNAME() throw ()
 #ifdef BUSYBEE_MULTITHREADED
     shutdown();
 #endif // BUSYBEE_MULTITHREADED
+}
+
+void
+CLASSNAME :: add_signals()
+{
+#ifdef HAVE_KQUEUE
+    struct kevent ee[3];
+    memset(&ee, 0, sizeof(ee));
+    EV_SET(&ee[0], SIGTERM, EVFILT_SIGNAL, EV_ADD | EV_CLEAR, 0, 0, NULL);
+    EV_SET(&ee[1], SIGQUIT, EVFILT_SIGNAL, EV_ADD | EV_CLEAR, 0, 0, NULL);
+    EV_SET(&ee[2], SIGINT, EVFILT_SIGNAL, EV_ADD | EV_CLEAR, 0, 0, NULL);
+
+    if(kevent(m_epoll.get(), ee, 3, NULL, 0, NULL) < 0)
+    {
+        throw po6::error(errno);
+    }
+#endif
 }
 
 #ifdef BUSYBEE_MULTITHREADED
@@ -543,8 +575,8 @@ void
 CLASSNAME :: wake_one()
 {
     uint64_t num = 1;
-    ssize_t ret = m_eventfd.write(&num, sizeof(num));
-    assert(ret == sizeof(num));
+    ssize_t ret = m_eventfdwrite.write(&m_pipebuf, num);
+    assert(ret == num);
 }
 #endif // BUSYBEE_MULTITHREADED
 
@@ -560,6 +592,39 @@ CLASSNAME :: set_timeout(int timeout)
 {
     m_timeout = timeout;
 }
+
+#ifdef HAVE_EPOLL_CTL 
+int
+CLASSNAME :: add_event(int fd, uint32_t events)
+{
+  epoll_event ee;
+  memset(&ee, 0, sizeof(ee));
+  ee.data.fd = fd;
+  ee.events = events;
+  return epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, fd, &ee);
+}
+#elif defined HAVE_KQUEUE
+int
+CLASSNAME :: add_event(int fd, uint32_t events)
+{
+  int flags = (events & EPOLLET) ? EV_ADD | EV_CLEAR : EV_ADD;
+  int n = 0;
+  struct kevent ee[2];
+  memset(&ee, 0, sizeof(ee));
+
+  if(events & EPOLLIN)
+  {
+    EV_SET(ee, fd, EVFILT_READ, flags, 0, 0, NULL);
+    ++n;
+  } 
+  if(events & EPOLLOUT)
+  {
+    EV_SET(&ee[n], fd, EVFILT_WRITE, flags, 0, 0, NULL);
+    ++n;
+  }
+  return kevent(m_epoll.get(), ee, n, NULL, 0, NULL);
+}
+#endif
 
 #ifndef _MSC_VER
 void
@@ -580,12 +645,8 @@ CLASSNAME :: unset_ignore_signals()
 busybee_returncode
 CLASSNAME :: set_external_fd(int fd)
 {
-    epoll_event ee;
-    memset(&ee, 0, sizeof(ee));
-    ee.data.fd = fd;
-    ee.events = EPOLLIN;
 
-    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, fd, &ee) < 0)
+    if (add_event(fd, EPOLLIN) < 0)
     {
         DEBUG << "failed to add file descriptor to epoll" << std::endl;
         return BUSYBEE_POLLFAILED;
@@ -860,10 +921,10 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 			if(m_external)
 				m_epoll.fd_count -= m_external->fd_count;
 #else
-        epoll_event ee;
-        memset(&ee, 0, sizeof(ee));
+        int fd;
+        uint32_t events;
 
-        if ((status = epoll_pwait(m_epoll.get(), &ee, 1, m_timeout, &m_sigmask)) <= 0)
+        if ((status = wait_event(&fd, &events)) <= 0)
         {
 #endif
 			
@@ -910,15 +971,15 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         DEBUG << "received events from the syscall" << std::endl;
 
 #ifdef BUSYBEE_MULTITHREADED
-        if (ee.data.fd == m_eventfd.get())
+        if (fd == m_eventfdread.get())
         {
             DEBUG << "received events for eventfd" << std::endl;
 
-            if ((ee.events & EPOLLIN))
+            if ((events & EPOLLIN))
             {
                 DEBUG << "event is EPOLLIN" << std::endl;
-                char buf[8];
-                m_eventfd.read(buf, 8);
+                char buf;
+                m_eventfdread.read(&buf, 1);
                 need_to_pause = true;
             }
 
@@ -927,11 +988,11 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #endif // BUSYBEE_MULTITHREADED
 
 #ifdef BUSYBEE_ACCEPT
-        if (ee.data.fd == m_listen.get())
+        if (fd == m_listen.get())
         {
             DEBUG << "received events for listenfd" << std::endl;
 
-            if ((ee.events & EPOLLIN))
+            if ((events & EPOLLIN))
             {
                 DEBUG << "event is EPOLLIN" << std::endl;
                 work_accept();
@@ -956,7 +1017,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 			}
 		}
 #else
-        if (ee.data.fd == m_external)
+        if (fd == m_external)
         {
             DEBUG << "received events for externalfd" << std::endl;
             return BUSYBEE_EXTERNAL;
@@ -970,8 +1031,8 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 		channel& chan(m_channels[(size_t)(ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0])]);
 #else
         // Get the channel object
-        DEBUG << "processing fd=" << ee.data.fd << " as communication channel" << std::endl;
-        channel& chan(m_channels[ee.data.fd]);
+        DEBUG << "processing fd=" << fd << " as communication channel" << std::endl;
+        channel& chan(m_channels[fd]);
 #endif // _MSC_VER
 
 #ifdef BUSYBEE_MULTITHREADED
@@ -989,7 +1050,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
 #ifndef _MSC_VER
 		//For now, windows uses only synchronous sends.
-        if ((ee.events & EPOLLOUT))
+        if ((events & EPOLLOUT))
         {
             DEBUG << "event is EPOLLOUT" << std::endl;
             work_send(&chan, &need_close, &quiet);
@@ -1003,7 +1064,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #ifdef _MSC_VER
 		if(ee.fd_count > 0)
 #else
-        if ((ee.events & EPOLLIN))
+        if ((events & EPOLLIN))
 #endif // _MSC_VER
         {
             DEBUG << "event is EPOLLIN" << std::endl;
@@ -1017,7 +1078,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #ifdef _MSC_VER
 		if(ff.fd_count > 0)
 #else
-        if ((ee.events & EPOLLERR) || (ee.events & EPOLLHUP))
+        if ((events & EPOLLERR) || (events & EPOLLHUP))
 #endif
         {
             need_close = true;
@@ -1054,9 +1115,8 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 void
 CLASSNAME :: up_the_semaphore()
 {
-    uint64_t num = m_pause_count;
-    ssize_t ret = m_eventfd.write(&num, sizeof(num));
-    assert(ret == sizeof(num));
+    ssize_t ret = m_eventfdwrite.write(&m_pipebuf, m_pause_count);
+    assert(ret == m_pause_count);
 }
 #endif // BUSYBEE_MULTITHREADED
 
@@ -1131,12 +1191,8 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_ta
 #ifdef _MSC_VER
 	FD_SET(chan->soc.get(),&m_epoll);
 #else
-    epoll_event ee;
-    memset(&ee, 0, sizeof(ee));
-    ee.data.fd = chan->soc.get();
-    ee.events = EPOLLIN|EPOLLOUT|EPOLLET;
 
-    if (epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, chan->soc.get(), &ee) < 0)
+    if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
     {
         DEBUG << "failed to add file descriptor to epoll" << std::endl;
         return false;
@@ -1641,3 +1697,43 @@ CLASSNAME :: send_ack(channel* chan)
     work_send(chan, &need_close, &quiet);
     return need_close;
 }
+
+#ifdef HAVE_EPOLL_CTL
+int
+CLASSNAME :: wait_event(int* fd, uint32_t* events)
+{
+    epoll_event ee;
+    int ret = epoll_pwait(m_epoll.get(), &ee, 1, m_timeout, &m_sigmask);
+    *fd = ee.data.fd;
+    *events = ee.events;
+    return ret;
+}
+#elif HAVE_KQUEUE
+int
+CLASSNAME :: wait_event(int* fd, uint32_t* events)
+{
+    struct kevent ee;
+    struct timespec to = {0,0}; 
+    if (m_timeout < 0) 
+        to.tv_nsec = 50000;
+    else
+        to.tv_nsec = m_timeout * 1000;
+
+    int ret = kevent(m_epoll.get(), NULL, 0, &ee, 1, &to);
+    *fd = ee.ident;
+
+    switch(ee.filter)
+    {
+        case EVFILT_READ:
+            *events = EPOLLIN;
+            break;
+        case EVFILT_WRITE:
+            *events = EPOLLOUT;
+            break;
+        default:
+            *events = EPOLLERR;
+    }
+
+    return ret;
+}
+#endif

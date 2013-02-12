@@ -73,6 +73,7 @@ class busybee_mta
         void set_timeout(int timeout); // call while paused
         void set_ignore_signals();
         void unset_ignore_signals();
+        void add_signals();
 
     public:
         bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
@@ -89,6 +90,9 @@ class busybee_mta
         class send_message;
 
     private:
+        int add_event(int fd, uint32_t events);
+        int wait_event(int* fd, uint32_t* events);
+        // Alert the threads to wake them up with eventfd
         void up_the_semaphore();
 
     private:
@@ -115,7 +119,9 @@ class busybee_mta
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
         sigset_t m_sigmask;
-        po6::io::fd m_eventfd;
+        char* m_pipebuf;
+        po6::io::fd m_eventfdread;
+        po6::io::fd m_eventfdwrite;
         po6::threads::mutex m_pause_lock;
         po6::threads::cond m_pause_all_paused;
         po6::threads::cond m_pause_may_unpause;
