@@ -38,7 +38,7 @@
 
 // e
 #include <e/endian.h>
-#include <e/timer.h>
+#include <e/time.h>
 
 // BusyBee
 #include "busybee_single.h"

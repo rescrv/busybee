@@ -72,8 +72,6 @@
 #include <e/endian.h>
 #include <e/guard.h>
 #include <e/nonblocking_bounded_fifo.h>
-#include <e/pow2.h>
-#include <e/timer.h>
 
 // BusyBee
 #include "busybee_constants.h"
