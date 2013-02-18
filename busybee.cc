@@ -513,7 +513,15 @@ CLASSNAME :: ~CLASSNAME() throw ()
 {
 #ifdef BUSYBEE_MULTITHREADED
     shutdown();
+    po6::threads::mutex::hold hold(&m_recv_lock);
 #endif // BUSYBEE_MULTITHREADED
+
+    while (m_recv_queue)
+    {
+        recv_message* m = m_recv_queue;
+        m_recv_queue = m_recv_queue->next;
+        delete m;
+    }
 }
 
 void
