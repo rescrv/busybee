@@ -1712,12 +1712,19 @@ CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
     struct kevent ee;
     struct timespec to = {0,0}; 
-    if (m_timeout < 0) 
-        to.tv_nsec = 50000;
-    else
-        to.tv_nsec = m_timeout * 1000;
+    int ret;
 
-    int ret = kevent(m_epoll.get(), NULL, 0, &ee, 1, &to);
+    if (m_timeout < 0) 
+    {
+        ret = kevent(m_epoll.get(), NULL, 0, &ee, 1, NULL);
+    }
+    else
+    {
+        to.tv_sec = m_timeout / 1000;
+        to.tv_nsec = (m_timeout % 1000) * 1000000;
+        ret = kevent(m_epoll.get(), NULL, 0, &ee, 1, &to);
+    }
+
     *fd = ee.ident;
 
     switch(ee.filter)
