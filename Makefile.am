@@ -30,9 +30,23 @@ AM_CXXFLAGS = $(WANAL_CXXFLAGS) $(E_CFLAGS)
 
 EXTRA_DIST = LICENSE busybee.cc
 
+noinst_PROGRAMS =
 include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busybee_utils.h busybee_mta.h busybee_sta.h busybee_st.h busybee_single.h
 lib_LTLIBRARIES = libbusybee.la
 libbusybee_la_SOURCES = busybee_mta.cc busybee_sta.cc busybee_st.cc busybee_mapper.cc busybee_returncode.cc busybee_single.cc busybee_utils.cc
 libbusybee_la_LIBADD = $(E_LIBS)
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = busybee.pc
+
+if ENABLE_BENCHMARKS
+noinst_PROGRAMS += busybee-bench-mta busybee-bench-st busybee-bench-sta
+busybee_bench_mta_SOURCES = busybee-bench-mta.cc
+busybee_bench_mta_LDFLAGS = -no-install
+busybee_bench_mta_LDADD = libbusybee.la
+busybee_bench_sta_SOURCES = busybee-bench-mta.cc
+busybee_bench_sta_LDFLAGS = -no-install
+busybee_bench_sta_LDADD = libbusybee.la
+busybee_bench_st_SOURCES = busybee-bench-st.cc
+busybee_bench_st_LDFLAGS = -no-install
+busybee_bench_st_LDADD = libbusybee.la
+endif

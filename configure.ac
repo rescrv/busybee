@@ -40,6 +40,11 @@ AC_EGREP_HEADER([SO_NOSIGPIPE],[sys/socket.h],AC_DEFINE([HAVE_SO_NOSIGPIPE],[1],
 AC_FUNC_ERROR_AT_LINE
 AC_CHECK_FUNCS([memmove socket epoll_ctl kqueue clock_gettime mach_absolute_time])
 
+AC_ARG_ENABLE([benchmarks], [AS_HELP_STRING([--enable-benchmarks],
+              [build the benchmarks @<:@default: no@:>@])],
+              [enable_benchmarks=${enableval}], [enable_benchmarks=no])
+AM_CONDITIONAL([ENABLE_BENCHMARKS], [test x"${enable_benchmarks}" = xyes])
+
 AC_CONFIG_FILES([Makefile
                  busybee.pc])
 AC_OUTPUT

@@ -57,7 +57,7 @@
 #ifdef HAVE_EPOLL_CTL
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
-#elif defined HAVE_KQUEUE 
+#elif defined HAVE_KQUEUE
 #include <sys/event.h>
 #else
 #error no_event
@@ -147,7 +147,7 @@
 
 #define CLASSNAME CONCAT(busybee_, BUSYBEE_TYPE)
 
-#ifdef HAVE_EPOLL_CTL 
+#ifdef HAVE_EPOLL_CTL
 #define EPOLL_CREATE(N) epoll_create(N)
 #elif HAVE_KQUEUE
 #define EPOLL_CREATE(N) kqueue()
@@ -465,8 +465,8 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
 busybee_st :: busybee_st(busybee_mapper* mapper,
                          uint64_t server_id)
 #ifdef _MSC_VER
-	: m_epoll() //this is the master struct fd_set
-	, m_channels_sz(1024) //XXX: find out how to get the right size in windows.
+    : m_epoll() //this is the master struct fd_set
+    , m_channels_sz(1024) //XXX: find out how to get the right size in windows.
 #else
     : m_epoll(EPOLL_CREATE(64))
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
@@ -475,13 +475,13 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     , m_server2channel(10)
     , m_mapper(mapper)
     , m_server_id(server_id)
-	, m_timeout(-1)
+    , m_timeout(-1)
 #ifdef _MSC_VER
-	, m_external(NULL)
+    , m_external(NULL)
 #else
     , m_external(-1)
 #endif
-	, m_recv_queue(NULL)
+    , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
 #ifndef _MSC_VER
     , m_sigmask()
@@ -599,7 +599,7 @@ CLASSNAME :: set_timeout(int timeout)
     m_timeout = timeout;
 }
 
-#ifdef HAVE_EPOLL_CTL 
+#ifdef HAVE_EPOLL_CTL
 int
 CLASSNAME :: add_event(int fd, uint32_t events)
 {
@@ -622,7 +622,7 @@ CLASSNAME :: add_event(int fd, uint32_t events)
   {
     EV_SET(ee, fd, EVFILT_READ, flags, 0, 0, NULL);
     ++n;
-  } 
+  }
   if(events & EPOLLOUT)
   {
     EV_SET(&ee[n], fd, EVFILT_WRITE, flags, 0, 0, NULL);
@@ -665,8 +665,8 @@ CLASSNAME :: set_external_fd(int fd)
 busybee_returncode
 CLASSNAME :: set_external_fd(struct fd_set* fd)
 {
-	// XXX: This is not portable.  It relies on the windows implementation
-	// of struct fd_set.
+    // XXX: This is not portable.  It relies on the windows implementation
+    // of struct fd_set.
 
     m_external = fd;
     return BUSYBEE_SUCCESS;
@@ -700,7 +700,7 @@ CLASSNAME :: poll_fd()
 struct fd_set*
 CLASSNAME :: poll_fd()
 {
-	return &m_epoll;
+    return &m_epoll;
 }
 #endif
 
@@ -884,48 +884,48 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         DEBUG << "making syscall to poll for events" << std::endl;
         int status;
 #ifdef _MSC_VER
-		fd_set ee;
-		fd_set ff;
-		memmove(&ee, &m_epoll, sizeof(fd_set));
+        fd_set ee;
+        fd_set ff;
+        memmove(&ee, &m_epoll, sizeof(fd_set));
 
-		if(m_external)
-		{
-			int i;
+        if(m_external)
+        {
+            int i;
 
-			for(i = 0; i < m_external->fd_count; ++i)
-			{
-				FD_SET(m_external->fd_array[i], &m_epoll);
-			}
-		}
+            for(i = 0; i < m_external->fd_count; ++i)
+            {
+                FD_SET(m_external->fd_array[i], &m_epoll);
+            }
+        }
 
-		memmove(&ff, &ee, sizeof(fd_set));
+        memmove(&ff, &ee, sizeof(fd_set));
 
-		DEBUG << "m_timeout = " << m_timeout << std::endl;
-		
-		if(m_timeout < 0)
-		{
-			status = select(1, &ee, NULL, &ff, NULL);
-		}
+        DEBUG << "m_timeout = " << m_timeout << std::endl;
 
-		else
-		{
-			struct timeval ts;
-			ts.tv_sec = (m_timeout / 1000);
-			ts.tv_usec = ((m_timeout % 1000) * 1000);
-			status = select(1, &ee, NULL, &ff, &ts);
-		}
+        if(m_timeout < 0)
+        {
+            status = select(1, &ee, NULL, &ff, NULL);
+        }
 
-		if(status <= 0)
-		{
+        else
+        {
+            struct timeval ts;
+            ts.tv_sec = (m_timeout / 1000);
+            ts.tv_usec = ((m_timeout % 1000) * 1000);
+            status = select(1, &ee, NULL, &ff, &ts);
+        }
 
-			// The fds are always in a contiguous block, so the
-			// last part of the array is the full set of external
-			// FDs.  Internally, the system uses fd_count to know
-			// where to stop looking, so we can just subtract from it.
-			// This ensures that each time we call select, we have the most
-			// up to date set of fds from replicant.
-			if(m_external)
-				m_epoll.fd_count -= m_external->fd_count;
+        if(status <= 0)
+        {
+
+            // The fds are always in a contiguous block, so the
+            // last part of the array is the full set of external
+            // FDs.  Internally, the system uses fd_count to know
+            // where to stop looking, so we can just subtract from it.
+            // This ensures that each time we call select, we have the most
+            // up to date set of fds from replicant.
+            if(m_external)
+                m_epoll.fd_count -= m_external->fd_count;
 #else
         int fd;
         uint32_t events;
@@ -933,7 +933,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         if ((status = wait_event(&fd, &events)) <= 0)
         {
 #endif
-			
+
 #ifdef _MSC_VER
             errno = WSAGetLastError();
 
@@ -1010,18 +1010,18 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
 #ifdef BUSYBEE_ST
 #ifdef _MSC_VER
-		if(m_external)
-		{
-			int i;
+        if(m_external)
+        {
+            int i;
 
-			for(i = 0; i < m_external->fd_count; ++i)
-			{
-				if(FD_ISSET(m_external->fd_array[i], &ee))
-				{
-					DEBUG << "received events for externalfd" << std::endl;
-				}
-			}
-		}
+            for(i = 0; i < m_external->fd_count; ++i)
+            {
+                if(FD_ISSET(m_external->fd_array[i], &ee))
+                {
+                    DEBUG << "received events for externalfd" << std::endl;
+                }
+            }
+        }
 #else
         if (fd == m_external)
         {
@@ -1032,9 +1032,9 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #endif // BUSYBEE_ST
 
 #ifdef _MSC_VER
-		// Get the channel object
-		DEBUG << "processing fd=" << (ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0]) << " as communication channel" << std::endl;
-		channel& chan(m_channels[(size_t)(ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0])]);
+        // Get the channel object
+        DEBUG << "processing fd=" << (ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0]) << " as communication channel" << std::endl;
+        channel& chan(m_channels[(size_t)(ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0])]);
 #else
         // Get the channel object
         DEBUG << "processing fd=" << fd << " as communication channel" << std::endl;
@@ -1055,7 +1055,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         bool quiet = true;
 
 #ifndef _MSC_VER
-		//For now, windows uses only synchronous sends.
+        //For now, windows uses only synchronous sends.
         if ((events & EPOLLOUT))
         {
             DEBUG << "event is EPOLLOUT" << std::endl;
@@ -1068,7 +1068,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #endif // _MSC_VER
 
 #ifdef _MSC_VER
-		if(ee.fd_count > 0)
+        if(ee.fd_count > 0)
 #else
         if ((events & EPOLLIN))
 #endif // _MSC_VER
@@ -1082,7 +1082,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         }
 
 #ifdef _MSC_VER
-		if(ff.fd_count > 0)
+        if(ff.fd_count > 0)
 #else
         if ((events & EPOLLERR) || (events & EPOLLHUP))
 #endif
@@ -1195,7 +1195,7 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_ta
     chan->soc.set_tcp_nodelay();
     chan->state = channel::CONNECTED;
 #ifdef _MSC_VER
-	FD_SET(chan->soc.get(),&m_epoll);
+    FD_SET(chan->soc.get(),&m_epoll);
 #else
 
     if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
@@ -1226,7 +1226,7 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_ta
 #ifdef _MSC_VER
     if (WSAPoll(&pfd, 1, 0) > 0)
 #else
-	if (poll(&pfd, 1, 0) > 0)
+    if (poll(&pfd, 1, 0) > 0)
 #endif
     {
         DEBUG << "there's already data available for reading, reading it now" << std::endl;
@@ -1598,22 +1598,22 @@ CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
         flags |= MSG_NOSIGNAL;
 #endif // HAVE_MSG_NOSIGNAL
 #ifdef _MSC_VER
-		//XXX:  Windows is level triggered, so just send synchronously.
-		u_long mode = 0;
-		if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
-		{
-			*need_close = true;
-			*quiet = false;
-		}
+        //XXX:  Windows is level triggered, so just send synchronously.
+        u_long mode = 0;
+        if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
+        {
+            *need_close = true;
+            *quiet = false;
+        }
 #endif
         ssize_t ret = chan->soc.send(chan->send_progress.data(), chan->send_progress.size(), flags);
 #ifdef _MSC_VER
-		mode = 1;
-		if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
-		{
-			*need_close = true;
-			*quiet = false;
-		}
+        mode = 1;
+        if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
+        {
+            *need_close = true;
+            *quiet = false;
+        }
         errno = WSAGetLastError();
         if (ret < 0 && errno != WSAEINTR && errno != WSAEWOULDBLOCK)
 #else
@@ -1719,8 +1719,8 @@ int
 CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
     struct kevent ee;
-    struct timespec to = {0,0}; 
-    if (m_timeout < 0) 
+    struct timespec to = {0,0};
+    if (m_timeout < 0)
         to.tv_nsec = 50000;
     else
         to.tv_nsec = m_timeout * 1000;

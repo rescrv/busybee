@@ -9,6 +9,9 @@
 aclocal.m4
 autom4te.cache/
 autoscan.log
+busybee-bench-mta
+busybee-bench-st
+busybee-bench-sta
 busybee.pc
 config.guess
 config.h
