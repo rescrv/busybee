@@ -51,10 +51,9 @@
 #include <Winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
-#endif
 
 // Linux
-#ifdef HAVE_EPOLL_CTL
+#elif defined HAVE_EPOLL_CTL
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #elif defined HAVE_KQUEUE

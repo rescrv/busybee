@@ -57,8 +57,8 @@ class busybee_st
 #ifndef _MSC_VER
         void set_ignore_signals();
         void unset_ignore_signals();
-        void add_signals();
 #endif
+        void add_signals();
 
     public:
 #ifdef _MSC_VER
