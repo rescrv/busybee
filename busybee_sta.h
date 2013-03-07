@@ -44,6 +44,8 @@
 #include <busybee_mapper.h>
 #include <busybee_returncode.h>
 
+#define BUSYBEE_HIDDEN __attribute__((visibility("hidden")))
+
 class busybee_sta
 {
     public:
@@ -73,17 +75,20 @@ class busybee_sta
         class send_message;
 
     private:
-        busybee_returncode get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
-        bool setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag);
-        void set_mapping(uint64_t server_id, uint64_t chan_tag);
-        void work_accept();
-        int add_event(int fd, uint32_t events);
-        int wait_event(int* fd, uint32_t* events);
-        void work_close(channel* chan);
-        void work_recv(channel* chan, bool* need_close, bool* quiet);
-        void work_send(channel* chan, bool* need_close, bool* quiet);
-        bool send_fin(channel* chan);
-        bool send_ack(channel* chan);
+        int BUSYBEE_HIDDEN add_event(int fd, uint32_t events);
+        int BUSYBEE_HIDDEN wait_event(int* fd, uint32_t* events);
+        busybee_returncode BUSYBEE_HIDDEN get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
+        busybee_returncode BUSYBEE_HIDDEN setup_channel(po6::net::socket* soc, channel* chan);
+        busybee_returncode BUSYBEE_HIDDEN possibly_work_recv(channel* chan);
+        void BUSYBEE_HIDDEN work_accept();
+        bool BUSYBEE_HIDDEN work_close(channel* chan, busybee_returncode* rc);
+        bool BUSYBEE_HIDDEN work_send(channel* chan, busybee_returncode* rc);
+        bool BUSYBEE_HIDDEN work_recv(channel* chan, busybee_returncode* rc);
+        bool BUSYBEE_HIDDEN state_transition(channel* chan, busybee_returncode* rc);
+        void BUSYBEE_HIDDEN handle_identify(channel* chan, bool* need_close, bool* clean_close);
+        void BUSYBEE_HIDDEN handle_fin(channel* chan, bool* need_close, bool* clean_close);
+        void BUSYBEE_HIDDEN handle_ack(channel* chan, bool* need_close, bool* clean_close);
+        bool BUSYBEE_HIDDEN send_finack(channel* chan);
 
     private:
         po6::io::fd m_epoll;
@@ -102,5 +107,7 @@ class busybee_sta
         busybee_sta(const busybee_sta&);
         busybee_sta& operator = (const busybee_sta&);
 };
+
+#undef BUSYBEE_HIDDEN
 
 #endif // busybee_sta_h_

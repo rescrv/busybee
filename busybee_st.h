@@ -44,6 +44,8 @@
 #include <busybee_mapper.h>
 #include <busybee_returncode.h>
 
+#define BUSYBEE_HIDDEN __attribute__((visibility("hidden")))
+
 class busybee_st
 {
     public:
@@ -54,25 +56,15 @@ class busybee_st
     public:
         void set_id(uint64_t server_id);
         void set_timeout(int timeout);
-#ifndef _MSC_VER
         void set_ignore_signals();
         void unset_ignore_signals();
-#endif
         void add_signals();
 
     public:
-#ifdef _MSC_VER
-        busybee_returncode set_external_fd(struct fd_set* fd);
-#else
         busybee_returncode set_external_fd(int fd);
-#endif
 
     public:
-#ifndef _MSC_VER
         int poll_fd();
-#else
-		struct fd_set* poll_fd();
-#endif
         busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
@@ -85,47 +77,42 @@ class busybee_st
         class send_message;
 
     private:
-        int add_event(int fd, uint32_t events);
-        int wait_event(int* fd, uint32_t* events);
-        busybee_returncode get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
-        bool setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag);
-        void set_mapping(uint64_t server_id, uint64_t chan_tag);
-        void work_close(channel* chan);
-        void work_recv(channel* chan, bool* need_close, bool* quiet);
-        void work_send(channel* chan, bool* need_close, bool* quiet);
-        bool send_fin(channel* chan);
-        bool send_ack(channel* chan);
+        int BUSYBEE_HIDDEN add_event(int fd, uint32_t events);
+        int BUSYBEE_HIDDEN wait_event(int* fd, uint32_t* events);
+        busybee_returncode BUSYBEE_HIDDEN get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
+        busybee_returncode BUSYBEE_HIDDEN setup_channel(po6::net::socket* soc, channel* chan);
+        busybee_returncode BUSYBEE_HIDDEN possibly_work_recv(channel* chan);
+        bool BUSYBEE_HIDDEN work_close(channel* chan, busybee_returncode* rc);
+        bool BUSYBEE_HIDDEN work_send(channel* chan, busybee_returncode* rc);
+        bool BUSYBEE_HIDDEN work_recv(channel* chan, busybee_returncode* rc);
+        bool BUSYBEE_HIDDEN state_transition(channel* chan, busybee_returncode* rc);
+        void BUSYBEE_HIDDEN handle_identify(channel* chan, bool* need_close, bool* clean_close);
+        void BUSYBEE_HIDDEN handle_fin(channel* chan, bool* need_close, bool* clean_close);
+        void BUSYBEE_HIDDEN handle_ack(channel* chan, bool* need_close, bool* clean_close);
+        bool BUSYBEE_HIDDEN send_finack(channel* chan);
 
     private:
-#ifdef _MSC_VER
-        struct fd_set m_epoll;
-#else
-		po6::io::fd m_epoll;
-#endif
+        po6::io::fd m_epoll;
         size_t m_channels_sz;
         e::array_ptr<channel> m_channels;
-	static uint64_t hash(const uint64_t& r)
-	{
-		return r;
-	}
+        static uint64_t hash(const uint64_t& r)
+        {
+            return r;
+        }
         e::lockfree_hash_map<uint64_t, uint64_t, hash> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
         int m_timeout;
-#ifdef _MSC_VER
-        struct fd_set* m_external;
-#else
-		int m_external;
-#endif
+        int m_external;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
-#ifndef _MSC_VER
-		sigset_t m_sigmask;
-#endif
+        sigset_t m_sigmask;
 
     private:
         busybee_st(const busybee_st&);
         busybee_st& operator = (const busybee_st&);
 };
+
+#undef BUSYBEE_HIDDEN
 
 #endif // busybee_st_h_

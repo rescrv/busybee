@@ -42,24 +42,17 @@
 // POSIX
 #include <signal.h>
 #include <sys/types.h>
-#ifndef _MSC_VER
 #include <poll.h>
-#endif
-
-//Windows
-#ifdef _MSC_VER
-#include <Winsock2.h>
-#include <ws2tcpip.h>
-#include <mstcpip.h>
 
 // Linux
-#elif defined HAVE_EPOLL_CTL
+#ifdef HAVE_EPOLL_CTL
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
-#elif defined HAVE_KQUEUE
+#endif
+
+// BSD / OS X
+#ifdef HAVE_KQUEUE
 #include <sys/event.h>
-#else
-#error no_event
 #endif
 
 // po6
@@ -70,7 +63,6 @@
 #include <e/atomic.h>
 #include <e/endian.h>
 #include <e/guard.h>
-#include <e/nonblocking_bounded_fifo.h>
 
 // BusyBee
 #include "busybee_constants.h"
@@ -152,19 +144,25 @@
 #define EPOLL_CREATE(N) kqueue()
 #endif
 
+#ifdef HAVE_MSG_NOSIGNAL
+#define SENDRECV_FLAGS (MSG_NOSIGNAL)
+#else
+#define SENDRECV_FLAGS 0
+#endif // HAVE_MSG_NOSIGNAL
+
 // Some Constants
 #define IO_BLOCKSIZE 4096
-#define NUM_MSGS_PER_RECV (IO_BLOCKSIZE / BUSYBEE_HEADER_SIZE)
+#define HIDDEN __attribute__((visibility("hidden")))
 
 #define BBMSG_IDENTIFY 0x80000000UL
 #define BBMSG_FIN      0x40000000UL
 #define BBMSG_ACK      0x20000000UL
-#define BBMSG_MASK     0x1fffffffUL
+#define BBMSG_SIZE     0x1fffffffUL
 #define BBMSG_FLAGS    0xe0000000UL
 
 ///////////////////////////////// Message Class ////////////////////////////////
 
-struct CLASSNAME::send_message
+struct HIDDEN CLASSNAME::send_message
 {
     send_message();
     send_message(send_message* n, std::auto_ptr<e::buffer> m);
@@ -195,7 +193,7 @@ CLASSNAME :: send_message :: ~send_message() throw ()
 
 ///////////////////////////////// Message Class ////////////////////////////////
 
-struct CLASSNAME::recv_message
+struct HIDDEN CLASSNAME::recv_message
 {
     recv_message();
     recv_message(recv_message* n, uint64_t i, std::auto_ptr<e::buffer> m);
@@ -229,35 +227,39 @@ CLASSNAME :: recv_message :: ~recv_message() throw ()
 
 ///////////////////////////////// Channel Class ////////////////////////////////
 
-class CLASSNAME::channel
+class HIDDEN CLASSNAME::channel
 {
     public:
         channel();
         ~channel() throw ();
 
     public:
-        void reset(uint64_t new_tag);
-        void reset(uint64_t new_tag, po6::net::socket* soc);
+        void lock();
+        void unlock();
+        void reset(size_t channels_sz);
+        void initialize(po6::net::socket* soc);
 
     public:
-        enum { NOTCONNECTED, CONNECTED, IDENTIFIED, FIN_SENT, FINACK_SENT } state;
-        uint32_t flags;
-#ifdef BUSYBEE_MULTITHREADED
-        po6::threads::mutex mtx; // Anyone sending on the socket should hold this.
-#endif // BUSYBEE_MULTITHREADED
+        enum { NOTCONNECTED, CONNECTED, IDENTIFIED, CRASHING } state;
         uint64_t id;
         uint64_t tag;
         po6::net::socket soc;
-        // Queues and buffers for receiving
-        recv_message* recv_queue;
-        recv_message** recv_end;
-        size_t recv_partial_header_sz;
+        bool sender_has_it;
+        bool recver_has_it;
+        bool need_send;
+        bool need_recv;
+#ifdef BUSYBEE_MULTITHREADED
+        po6::threads::mutex mtx;
+#endif // BUSYBEE_MULTITHREADED
+        // recv state
+        unsigned short recv_partial_header_sz;
         char recv_partial_header[sizeof(uint32_t)];
         std::auto_ptr<e::buffer> recv_partial_msg;
-        // Queues for sending
-        send_message* send_queue;
-        send_message** send_end;
-        e::slice send_progress;
+        uint32_t recv_flags;
+        // send state
+        send_message* send_queue; // must hold mtx
+        send_message** send_end; // must hold mtx
+        uint8_t* send_ptr; // must flip sender_has_it false->true
 
     private:
         channel(const channel&);
@@ -266,20 +268,22 @@ class CLASSNAME::channel
 
 CLASSNAME :: channel :: channel()
     : state(NOTCONNECTED)
-    , flags(0)
-#ifdef BUSYBEE_MULTITHREADED
-    , mtx()
-#endif // BUSYBEE_MULTITHREADED
     , id(0)
     , tag(0)
     , soc()
-    , recv_queue(NULL)
-    , recv_end(&recv_queue)
+    , sender_has_it(false)
+    , recver_has_it(false)
+    , need_send(false)
+    , need_recv(false)
+#ifdef BUSYBEE_MULTITHREADED
+    , mtx()
+#endif // BUSYBEE_MULTITHREADED
     , recv_partial_header_sz(0)
     , recv_partial_msg()
+    , recv_flags(0)
     , send_queue(NULL)
     , send_end(&send_queue)
-    , send_progress("", 0)
+    , send_ptr(NULL)
 {
 }
 
@@ -288,11 +292,31 @@ CLASSNAME :: channel :: ~channel() throw ()
 }
 
 void
-CLASSNAME :: channel :: reset(uint64_t new_tag)
+CLASSNAME :: channel :: lock()
+{
+#ifdef BUSYBEE_MULTITHREADED
+    mtx.lock();
+#endif // BUSYBEE_MULTITHREADED
+}
+
+void
+CLASSNAME :: channel :: unlock()
+{
+#ifdef BUSYBEE_MULTITHREADED
+    mtx.unlock();
+#endif // BUSYBEE_MULTITHREADED
+}
+
+void
+CLASSNAME :: channel :: reset(size_t channels_sz)
 {
     state = channel::NOTCONNECTED;
     id    = 0;
-    tag   = new_tag;
+    tag  += channels_sz;
+    sender_has_it = false;
+    recver_has_it = false;
+    need_send = false;
+    need_recv = false;
 
     if (soc.get() >= 0)
     {
@@ -313,16 +337,9 @@ CLASSNAME :: channel :: reset(uint64_t new_tag)
         }
     }
 
-    while (recv_queue)
-    {
-        recv_message* tmp = recv_queue;
-        recv_queue = recv_queue->next;
-        delete tmp;
-    }
-
-    recv_end = &recv_queue;
     recv_partial_header_sz = 0;
     recv_partial_msg.reset();
+    recv_flags = 0;
 
     while (send_queue)
     {
@@ -331,15 +348,9 @@ CLASSNAME :: channel :: reset(uint64_t new_tag)
         delete tmp;
     }
 
+    send_queue = NULL;
     send_end = &send_queue;
-    send_progress = e::slice(NULL, 0);
-}
-
-void
-CLASSNAME :: channel :: reset(uint64_t new_tag, po6::net::socket* dst)
-{
-    reset(new_tag);
-    soc.swap(dst);
+    send_ptr = NULL;
 }
 
 ///////////////////////////////// BusyBee Class ////////////////////////////////
@@ -463,36 +474,22 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
 #ifdef BUSYBEE_ST
 busybee_st :: busybee_st(busybee_mapper* mapper,
                          uint64_t server_id)
-#ifdef _MSC_VER
-    : m_epoll() //this is the master struct fd_set
-    , m_channels_sz(1024) //XXX: find out how to get the right size in windows.
-#else
     : m_epoll(EPOLL_CREATE(64))
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
-#endif
     , m_channels(new channel[m_channels_sz])
     , m_server2channel(10)
     , m_mapper(mapper)
     , m_server_id(server_id)
     , m_timeout(-1)
-#ifdef _MSC_VER
-    , m_external(NULL)
-#else
     , m_external(-1)
-#endif
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
-#ifndef _MSC_VER
     , m_sigmask()
-#endif
 {
-
-#ifndef _MSC_VER
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
     }
-#endif
 
     add_signals();
 
@@ -501,9 +498,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
         m_channels[i].tag = m_channels_sz + i;
     }
 
-#ifndef _MSC_VER
     sigemptyset(&m_sigmask);
-#endif
     DEBUG << "initialized busybee_st instance at " << this << std::endl;
 }
 #endif // st
@@ -583,7 +578,7 @@ CLASSNAME :: wake_one()
 {
     uint64_t num = 1;
     ssize_t ret = m_eventfdwrite.write(&m_pipebuf, num);
-    assert(ret == num);
+    assert(ret == 1); // XXX
 }
 #endif // BUSYBEE_MULTITHREADED
 
@@ -600,6 +595,324 @@ CLASSNAME :: set_timeout(int timeout)
     m_timeout = timeout;
 }
 
+void
+CLASSNAME :: set_ignore_signals()
+{
+    sigfillset(&m_sigmask);
+}
+
+void
+CLASSNAME :: unset_ignore_signals()
+{
+    sigemptyset(&m_sigmask);
+}
+
+#ifdef BUSYBEE_ST
+busybee_returncode
+busybee_st :: set_external_fd(int fd)
+{
+    if (add_event(fd, EPOLLIN) < 0)
+    {
+        DEBUG << "failed to add file descriptor to epoll" << std::endl;
+        return BUSYBEE_POLLFAILED;
+    }
+
+    m_external = fd;
+    return BUSYBEE_SUCCESS;
+}
+#endif
+
+#ifdef BUSYBEE_MULTITHREADED
+bool
+CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
+{
+    DEBUG << "deliver(" << server_id << ", 0x" << msg->hex() << ")" << std::endl;
+    recv_message* m(new recv_message(NULL, server_id, msg));
+#ifdef BUSYBEE_MULTITHREADED
+    po6::threads::mutex::hold hold(&m_recv_lock);
+#endif // BUSYBEE_MULTITHREADED
+    *m_recv_end = m;
+    m_recv_end = &(m->next);
+    return true;
+}
+#endif // BUSYBEE_MULTITHREADED
+
+int
+CLASSNAME :: poll_fd()
+{
+    return m_epoll.get();
+}
+
+busybee_returncode
+CLASSNAME :: drop(uint64_t server_id)
+{
+    channel* chan = NULL;
+    uint64_t chan_tag = UINT64_MAX;
+
+    if (!m_server2channel.lookup(server_id, &chan_tag))
+    {
+        return BUSYBEE_SUCCESS;
+    }
+
+    chan = &m_channels[(chan_tag) % m_channels_sz];
+    chan->lock();
+
+    if (chan->sender_has_it || chan->recver_has_it)
+    {
+        chan->state = channel::CRASHING; // XXX
+    }
+    else
+    {
+        chan->reset(m_channels_sz);
+    }
+
+    chan->unlock();
+    return BUSYBEE_SUCCESS;
+}
+
+busybee_returncode
+CLASSNAME :: send(uint64_t server_id,
+                  std::auto_ptr<e::buffer> msg)
+{
+    assert(msg->size() >= BUSYBEE_HEADER_SIZE);
+    assert(msg->size() <= BUSYBEE_MAX_MSG_SIZE);
+    *msg << static_cast<uint32_t>(msg->size());
+    DEBUG << "send(" << server_id << ", " << msg->hex() << ")" << std::endl;
+    std::auto_ptr<send_message> sm(new send_message(NULL, msg));
+
+    while (true)
+    {
+        channel* chan = NULL;
+        uint64_t chan_tag = UINT64_MAX;
+        busybee_returncode rc = get_channel(server_id, &chan, &chan_tag);
+
+        if (rc != BUSYBEE_SUCCESS)
+        {
+            DEBUG << "_get_channel failed: " << rc << std::endl;
+            return rc;
+        }
+
+        chan->lock();
+
+        if (chan_tag != chan->tag ||
+            chan->state < channel::CONNECTED ||
+            chan->state > channel::IDENTIFIED)
+        {
+            chan->unlock();
+            continue;
+        }
+
+        bool queue_was_free = !chan->sender_has_it;
+        bool queue_was_empty = !chan->send_queue;
+        *chan->send_end = sm.get();
+        chan->send_end = &sm->next;
+        sm.release();
+        chan->sender_has_it = chan->sender_has_it || queue_was_empty;
+        chan->unlock();
+
+        if (queue_was_empty && queue_was_free)
+        {
+            // we have exclusive send access
+            rc = BUSYBEE_SUCCESS;
+
+            if (!work_send(chan, &rc))
+            {
+                return rc;
+            }
+        }
+
+        return BUSYBEE_SUCCESS;
+    }
+}
+
+busybee_returncode
+CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
+{
+#ifdef BUSYBEE_MULTITHREADED
+    bool need_to_pause = false;
+#endif // BUSYBEE_MULTITHREADED
+    //DEBUG << "recv(" << id << ", " << msg << ")" << std::endl;
+
+    while (true)
+    {
+#ifdef BUSYBEE_MULTITHREADED
+        if (need_to_pause)
+        {
+            bool did_we_pause = false;
+            po6::threads::mutex::hold hold(&m_pause_lock);
+
+            while (m_pause_paused && !m_shutdown)
+            {
+                ++m_pause_num;
+                assert(m_pause_num <= m_pause_count);
+
+                if (m_pause_num == m_pause_count)
+                {
+                    m_pause_all_paused.signal();
+                }
+
+                did_we_pause = true;
+                m_pause_may_unpause.wait();
+                --m_pause_num;
+            }
+
+            if (!did_we_pause)
+            {
+                m_recv_lock.lock();
+                // this is a barrier to ensure we see m_recv_queue
+                m_recv_lock.unlock();
+            }
+        }
+
+        if (m_shutdown)
+        {
+            return BUSYBEE_SHUTDOWN;
+        }
+#endif // BUSYBEE_MULTITHREADED
+
+        // this is a racy read; we assume that some thread will see the latest
+        // value (likely the one that last changed it).
+        if (m_recv_queue)
+        {
+#ifdef BUSYBEE_MULTITHREADED
+            m_recv_lock.lock();
+
+            if (!m_recv_queue)
+            {
+                m_recv_lock.unlock();
+                continue;
+            }
+#endif // BUSYBEE_MULTITHREADED
+
+            recv_message* m = m_recv_queue;
+
+            if (m_recv_queue->next)
+            {
+                m_recv_queue = m_recv_queue->next;
+            }
+            else
+            {
+                m_recv_queue = NULL;
+                m_recv_end = &m_recv_queue;
+            }
+
+#ifdef BUSYBEE_MULTITHREADED
+            m_recv_lock.unlock();
+#endif // BUSYBEE_MULTITHREADED
+            *id = m->id;
+            *msg = m->msg;
+            delete m;
+            return BUSYBEE_SUCCESS;
+        }
+
+        int status;
+        int fd;
+        uint32_t events;
+
+        if ((status = wait_event(&fd, &events)) <= 0)
+        {
+            if (status < 0 &&
+                errno != EAGAIN &&
+                errno != EINTR &&
+                errno != EWOULDBLOCK)
+            {
+                return BUSYBEE_POLLFAILED;
+            }
+
+            if (status < 0 && errno == EINTR)
+            {
+                return BUSYBEE_INTERRUPTED;
+            }
+
+            if (status == 0 && m_timeout >= 0)
+            {
+                return BUSYBEE_TIMEOUT;
+            }
+
+            continue;
+        }
+
+#ifdef BUSYBEE_MULTITHREADED
+        if (fd == m_eventfdread.get())
+        {
+            if ((events & EPOLLIN))
+            {
+                char buf;
+                m_eventfdread.read(&buf, 1);
+                need_to_pause = true;
+            }
+
+            continue;
+        }
+#endif // BUSYBEE_MULTITHREADED
+
+#ifdef BUSYBEE_ACCEPT
+        if (fd == m_listen.get())
+        {
+            if ((events & EPOLLIN))
+            {
+                work_accept();
+            }
+
+            continue;
+        }
+#endif // BUSYBEE_ACCEPT
+
+#ifdef BUSYBEE_ST
+        if (fd == m_external)
+        {
+            return BUSYBEE_EXTERNAL;
+        }
+#endif // BUSYBEE_ST
+
+        DEBUG << "processing fd=" << fd << " events=" << events << std::endl;
+        channel* chan = &m_channels[fd];
+
+        // acquire relevant read/write locks
+        chan->lock();
+
+        if (chan->state < channel::CONNECTED ||
+            chan->state > channel::IDENTIFIED)
+        {
+            chan->unlock();
+            continue;
+        }
+
+        // each bool says whether this thread should read/write
+        bool sender_has_it = !chan->sender_has_it && ((events & EPOLLOUT) || (events & EPOLLERR));
+        bool recver_has_it = !chan->recver_has_it && ((events & EPOLLIN) || (events & EPOLLHUP));
+        // if another thread is writing, record our event
+        chan->need_send = chan->sender_has_it && ((events & EPOLLOUT) || (events & EPOLLERR));
+        chan->need_recv = chan->recver_has_it && ((events & EPOLLIN) || (events & EPOLLHUP));
+        // mark the methods we have it for
+        chan->sender_has_it = chan->sender_has_it || sender_has_it;
+        chan->recver_has_it = chan->recver_has_it || recver_has_it;
+        chan->unlock();
+
+        busybee_returncode rc;
+
+        if (sender_has_it)
+        {
+            if (!work_send(chan, &rc))
+            {
+                *id = UINT64_MAX;
+                msg->reset();
+                return rc;
+            }
+        }
+
+        if (recver_has_it)
+        {
+            if (!work_recv(chan, &rc))
+            {
+                *id = UINT64_MAX;
+                msg->reset();
+                return rc;
+            }
+        }
+    }
+}
+
 #ifdef HAVE_EPOLL_CTL
 int
 CLASSNAME :: add_event(int fd, uint32_t events)
@@ -610,7 +923,9 @@ CLASSNAME :: add_event(int fd, uint32_t events)
   ee.events = events;
   return epoll_ctl(m_epoll.get(), EPOLL_CTL_ADD, fd, &ee);
 }
-#elif defined HAVE_KQUEUE
+#endif
+
+#if defined HAVE_KQUEUE
 int
 CLASSNAME :: add_event(int fd, uint32_t events)
 {
@@ -633,1092 +948,24 @@ CLASSNAME :: add_event(int fd, uint32_t events)
 }
 #endif
 
-#ifndef _MSC_VER
-void
-CLASSNAME :: set_ignore_signals()
-{
-    sigfillset(&m_sigmask);
-}
-
-void
-CLASSNAME :: unset_ignore_signals()
-{
-    sigemptyset(&m_sigmask);
-}
-#endif
-
-#ifdef BUSYBEE_ST
-#ifndef _MSC_VER
-busybee_returncode
-CLASSNAME :: set_external_fd(int fd)
-{
-
-    if (add_event(fd, EPOLLIN) < 0)
-    {
-        DEBUG << "failed to add file descriptor to epoll" << std::endl;
-        return BUSYBEE_POLLFAILED;
-    }
-
-    m_external = fd;
-    return BUSYBEE_SUCCESS;
-}
-#else
-busybee_returncode
-CLASSNAME :: set_external_fd(struct fd_set* fd)
-{
-    // XXX: This is not portable.  It relies on the windows implementation
-    // of struct fd_set.
-
-    m_external = fd;
-    return BUSYBEE_SUCCESS;
-}
-#endif
-#endif
-
-#ifdef BUSYBEE_MULTITHREADED
-bool
-CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
-{
-    DEBUG << "processing deliver from " << server_id << " with message " << msg->hex() << std::endl;
-    recv_message* m(new recv_message(NULL, server_id, msg));
-#ifdef BUSYBEE_MULTITHREADED
-    po6::threads::mutex::hold hold(&m_recv_lock);
-#endif // BUSYBEE_MULTITHREADED
-    *m_recv_end = m;
-    m_recv_end = &(m->next);
-    DEBUG << "done with deliver" << std::endl;
-    return true;
-}
-#endif // BUSYBEE_MULTITHREADED
-
-#ifndef _MSC_VER
-int
-CLASSNAME :: poll_fd()
-{
-    return m_epoll.get();
-}
-#else
-struct fd_set*
-CLASSNAME :: poll_fd()
-{
-    return &m_epoll;
-}
-#endif
-
-busybee_returncode
-CLASSNAME :: drop(uint64_t server_id)
-{
-    // Get the channel for this server or fail trying
-    channel* chan = NULL;
-    uint64_t chan_tag = UINT64_MAX;
-    busybee_returncode rc = get_channel(server_id, &chan, &chan_tag);
-
-    if (rc != BUSYBEE_SUCCESS)
-    {
-        return BUSYBEE_SUCCESS;
-    }
-
-    if (chan_tag != chan->tag || chan->soc.get() < 0)
-    {
-        return BUSYBEE_SUCCESS;
-    }
-
-    work_close(chan);
-    return BUSYBEE_SUCCESS;
-}
-
-busybee_returncode
-CLASSNAME :: send(uint64_t server_id,
-                  std::auto_ptr<e::buffer> msg)
-{
-    assert(msg->size() >= BUSYBEE_HEADER_SIZE);
-    assert(msg->size() <= BUSYBEE_MAX_MSG_SIZE);
-
-    // Pack the size into the header
-    *msg << static_cast<uint32_t>(msg->size());
-    DEBUG << "processing send to " << server_id << " with message " << msg->hex() << std::endl;
-
-    // Get the channel for this server or fail trying
-    channel* chan = NULL;
-    uint64_t chan_tag = UINT64_MAX;
-    busybee_returncode rc = get_channel(server_id, &chan, &chan_tag);
-
-    if (rc != BUSYBEE_SUCCESS)
-    {
-        DEBUG << "could not get channel in \"send\" because " << rc << std::endl;
-        return rc;
-    }
-
-#ifdef BUSYBEE_MULTITHREADED
-    po6::threads::mutex::hold hold(&chan->mtx);
-#endif // BUSYBEE_MULTITHREADED
-
-    if (chan_tag != chan->tag || chan->soc.get() < 0)
-    {
-        DEBUG << "disrupted because chan->tag=" << chan->tag
-              << " (expected " << chan_tag << ") and fd=" << chan->soc.get()
-              << std::endl;
-        return BUSYBEE_DISRUPTED;
-    }
-
-    bool empty = !chan->send_queue;
-    send_message* tmp = new send_message(NULL, msg);
-    *chan->send_end = tmp;
-    chan->send_end = &tmp->next;
-
-    if (empty)
-    {
-        DEBUG << "no messages queued, setting current message to be sent" << std::endl;
-        chan->send_progress = tmp->msg->as_slice();
-    }
-
-    bool need_close = false;
-    bool quiet = true;
-    DEBUG << "calling work_send" << std::endl;
-    work_send(chan, &need_close, &quiet);
-    DEBUG << "work_send returned " << (need_close ? "true" : "false") << " "
-          << (quiet ? "true" : "false") << std::endl;
-
-    if (need_close)
-    {
-        DEBUG << "calling work_close" << std::endl;
-        work_close(chan);
-
-        if (!quiet)
-        {
-            DEBUG << "not a quiet close, returning DISRUPTED" << std::endl;
-            return BUSYBEE_DISRUPTED;
-        }
-
-        DEBUG << "quiet close" << std::endl;
-    }
-
-    DEBUG << "\"send\" succeeded" << std::endl;
-    return BUSYBEE_SUCCESS;
-}
-
-busybee_returncode
-CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
-{
-#ifdef BUSYBEE_MULTITHREADED
-    bool need_to_pause = false;
-#endif // BUSYBEE_MULTITHREADED
-    DEBUG << "entering \"recv\"" << std::endl;
-
-    while (true)
-    {
-        DEBUG << "top of the loop" << std::endl;
-
-#ifdef BUSYBEE_MULTITHREADED
-        if (need_to_pause)
-        {
-            bool did_we_pause = false;
-            DEBUG << "may need to pause" << std::endl;
-            po6::threads::mutex::hold hold(&m_pause_lock);
-
-            while (m_pause_paused && !m_shutdown)
-            {
-                ++m_pause_num;
-                assert(m_pause_num <= m_pause_count);
-
-                if (m_pause_num == m_pause_count)
-                {
-                    m_pause_all_paused.signal();
-                }
-
-                did_we_pause = true;
-                m_pause_may_unpause.wait();
-                --m_pause_num;
-            }
-
-            if (did_we_pause)
-            {
-                DEBUG << "unpaused" << std::endl;
-            }
-            else
-            {
-                DEBUG << "did not pause" << std::endl;
-                m_recv_lock.lock();
-                DEBUG << "queue: " << m_recv_queue;
-                m_recv_lock.unlock();
-            }
-        }
-
-        if (m_shutdown)
-        {
-            DEBUG << "returning SHUTDOWN" << std::endl;
-            return BUSYBEE_SHUTDOWN;
-        }
-#endif // BUSYBEE_MULTITHREADED
-
-        // this is a racy read; we assume that some thread will see the latest
-        // value (likely the one that last changed it).
-        if (m_recv_queue)
-        {
-#ifdef BUSYBEE_MULTITHREADED
-            po6::threads::mutex::hold hold(&m_recv_lock);
-
-            if (!m_recv_queue)
-            {
-                continue;
-            }
-#endif // BUSYBEE_MULTITHREADED
-
-            recv_message* m = m_recv_queue;
-
-            if (m_recv_queue->next)
-            {
-                m_recv_queue = m_recv_queue->next;
-            }
-            else
-            {
-                m_recv_queue = NULL;
-                m_recv_end = &m_recv_queue;
-            }
-
-            *id = m->id;
-            *msg = m->msg;
-            delete m;
-            return BUSYBEE_SUCCESS;
-        }
-
-        DEBUG << "making syscall to poll for events" << std::endl;
-        int status;
-#ifdef _MSC_VER
-        fd_set ee;
-        fd_set ff;
-        memmove(&ee, &m_epoll, sizeof(fd_set));
-
-        if(m_external)
-        {
-            int i;
-
-            for(i = 0; i < m_external->fd_count; ++i)
-            {
-                FD_SET(m_external->fd_array[i], &m_epoll);
-            }
-        }
-
-        memmove(&ff, &ee, sizeof(fd_set));
-
-        DEBUG << "m_timeout = " << m_timeout << std::endl;
-
-        if(m_timeout < 0)
-        {
-            status = select(1, &ee, NULL, &ff, NULL);
-        }
-
-        else
-        {
-            struct timeval ts;
-            ts.tv_sec = (m_timeout / 1000);
-            ts.tv_usec = ((m_timeout % 1000) * 1000);
-            status = select(1, &ee, NULL, &ff, &ts);
-        }
-
-        if(status <= 0)
-        {
-
-            // The fds are always in a contiguous block, so the
-            // last part of the array is the full set of external
-            // FDs.  Internally, the system uses fd_count to know
-            // where to stop looking, so we can just subtract from it.
-            // This ensures that each time we call select, we have the most
-            // up to date set of fds from replicant.
-            if(m_external)
-                m_epoll.fd_count -= m_external->fd_count;
-#else
-        int fd;
-        uint32_t events;
-
-        if ((status = wait_event(&fd, &events)) <= 0)
-        {
-#endif
-
-#ifdef _MSC_VER
-            errno = WSAGetLastError();
-
-            if (status < 0 &&
-                errno != WSAEINTR &&
-                errno != WSAEWOULDBLOCK)
-#else
-            if (status < 0 &&
-                errno != EAGAIN &&
-                errno != EINTR &&
-                errno != EWOULDBLOCK)
-#endif
-            {
-                DEBUG << "syscall failed" << std::endl;
-                return BUSYBEE_POLLFAILED;
-            }
-
-#ifdef _MSC_VER
-            if (status < 0 && errno == WSAEINTR)
-#else
-            if (status < 0 && errno == EINTR)
-#endif
-            {
-                DEBUG << "syscall interrupted" << std::endl;
-                return BUSYBEE_INTERRUPTED;
-            }
-#ifdef _MSC_VER
-            if (status == 0)
-#else
-            if (status == 0 && m_timeout >= 0)
-#endif
-            {
-                DEBUG << "syscall timed-out" << std::endl;
-                return BUSYBEE_TIMEOUT;
-            }
-
-            DEBUG << "syscall EAGAIN or EWOULDBLOCK; continue" << std::endl;
-            continue;
-        }
-
-        DEBUG << "received events from the syscall" << std::endl;
-
-#ifdef BUSYBEE_MULTITHREADED
-        if (fd == m_eventfdread.get())
-        {
-            DEBUG << "received events for eventfd" << std::endl;
-
-            if ((events & EPOLLIN))
-            {
-                DEBUG << "event is EPOLLIN" << std::endl;
-                char buf;
-                m_eventfdread.read(&buf, 1);
-                need_to_pause = true;
-            }
-
-            continue;
-        }
-#endif // BUSYBEE_MULTITHREADED
-
-#ifdef BUSYBEE_ACCEPT
-        if (fd == m_listen.get())
-        {
-            DEBUG << "received events for listenfd" << std::endl;
-
-            if ((events & EPOLLIN))
-            {
-                DEBUG << "event is EPOLLIN" << std::endl;
-                work_accept();
-            }
-
-            continue;
-        }
-#endif // BUSYBEE_ACCEPT
-
-#ifdef BUSYBEE_ST
-#ifdef _MSC_VER
-        if(m_external)
-        {
-            int i;
-
-            for(i = 0; i < m_external->fd_count; ++i)
-            {
-                if(FD_ISSET(m_external->fd_array[i], &ee))
-                {
-                    DEBUG << "received events for externalfd" << std::endl;
-                }
-            }
-        }
-#else
-        if (fd == m_external)
-        {
-            DEBUG << "received events for externalfd" << std::endl;
-            return BUSYBEE_EXTERNAL;
-        }
-#endif //_MSC_VER
-#endif // BUSYBEE_ST
-
-#ifdef _MSC_VER
-        // Get the channel object
-        DEBUG << "processing fd=" << (ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0]) << " as communication channel" << std::endl;
-        channel& chan(m_channels[(size_t)(ee.fd_count > 0 ? ee.fd_array[0] : ff.fd_array[0])]);
-#else
-        // Get the channel object
-        DEBUG << "processing fd=" << fd << " as communication channel" << std::endl;
-        channel& chan(m_channels[fd]);
-#endif // _MSC_VER
-
-#ifdef BUSYBEE_MULTITHREADED
-        po6::threads::mutex::hold hold(&chan.mtx);
-#endif // BUSYBEE_MULTITHREADED
-
-        if (chan.soc.get() < 0)
-        {
-            DEBUG << "channel is closed; skipping";
-            continue;
-        }
-
-        bool need_close = false;
-        bool quiet = true;
-
-#ifndef _MSC_VER
-        //For now, windows uses only synchronous sends.
-        if ((events & EPOLLOUT))
-        {
-            DEBUG << "event is EPOLLOUT" << std::endl;
-            work_send(&chan, &need_close, &quiet);
-
-            DEBUG << "after processing EPOLLOUT, "
-                  << "need_close=" << (need_close ? "true" : "false") << " "
-                  << "quiet=" << (quiet ? "true" : "false") << std::endl;
-        }
-#endif // _MSC_VER
-
-#ifdef _MSC_VER
-        if(ee.fd_count > 0)
-#else
-        if ((events & EPOLLIN))
-#endif // _MSC_VER
-        {
-            DEBUG << "event is EPOLLIN" << std::endl;
-            work_recv(&chan, &need_close, &quiet);
-
-            DEBUG << "after processing EPOLLIN, "
-                  << "need_close=" << (need_close ? "true" : "false") << " "
-                  << "quiet=" << (quiet ? "true" : "false") << std::endl;
-        }
-
-#ifdef _MSC_VER
-        if(ff.fd_count > 0)
-#else
-        if ((events & EPOLLERR) || (events & EPOLLHUP))
-#endif
-        {
-            need_close = true;
-            quiet = false;
-
-            DEBUG << "after processing errors, "
-                  << "need_close=" << (need_close ? "true" : "false") << " "
-                  << "quiet=" << (quiet ? "true" : "false") << std::endl;
-        }
-
-        DEBUG << "after processing all events, "
-              << "need_close=" << (need_close ? "true" : "false") << " "
-              << "quiet=" << (quiet ? "true" : "false") << std::endl;
-
-        if (need_close)
-        {
-            DEBUG << "calling work_close" << std::endl;
-            *id = chan.id;
-            work_close(&chan);
-
-            if (!quiet)
-            {
-                msg->reset();
-                DEBUG << "not a quiet close, returning DISRUPTED" << std::endl;
-                return BUSYBEE_DISRUPTED;
-            }
-
-            DEBUG << "quiet close" << std::endl;
-        }
-    }
-}
-
-#ifdef BUSYBEE_MULTITHREADED
-void
-CLASSNAME :: up_the_semaphore()
-{
-    ssize_t ret = m_eventfdwrite.write(&m_pipebuf, m_pause_count);
-    assert(ret == m_pause_count);
-}
-#endif // BUSYBEE_MULTITHREADED
-
-busybee_returncode
-CLASSNAME :: get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag)
-{
-    DEBUG << "getting channel " << server_id << std::endl;
-
-    if (m_server2channel.lookup(server_id, chan_tag))
-    {
-        DEBUG << "already established, using chan_tag " << *chan_tag << std::endl;
-        *chan = &m_channels[(*chan_tag) % m_channels_sz];
-        return BUSYBEE_SUCCESS;
-    }
-
-    *chan = NULL;
-
-    try
-    {
-        po6::net::location dst;
-
-        if (!m_mapper->lookup(server_id, &dst))
-        {
-            DEBUG << "no known mapping for " << server_id << std::endl;
-            return BUSYBEE_DISRUPTED;
-        }
-
-        DEBUG << "mapping for " << server_id << " is " << dst << std::endl;
-        po6::net::socket soc(dst.address.family(), SOCK_STREAM, IPPROTO_TCP);
-        soc.connect(dst);
-        DEBUG << "establishing new connection to " << dst << " fd=" << soc.get() << std::endl;
-        *chan = &m_channels[soc.get()];
-#ifdef BUSYBEE_MULTITHREADED
-        po6::threads::mutex::hold hold(&(*chan)->mtx);
-#endif // BUSYBEE_MULTITHREADED
-        uint64_t new_tag = (*chan)->tag + m_channels_sz;
-        *chan_tag = new_tag;
-        void (channel::*func)(uint64_t) = &channel::reset;
-        e::guard g = e::makeobjguard(**chan, func, new_tag);
-
-        if (!setup_channel(&soc, *chan, new_tag))
-        {
-            DEBUG << "failed to setup the channel" << std::endl;
-            return BUSYBEE_DISRUPTED;
-        }
-
-        assert((*chan)->tag == new_tag);
-        (*chan)->id = server_id;
-        set_mapping(server_id, (*chan)->tag);
-        g.dismiss();
-        DEBUG << "successfully created channel to " << server_id << std::endl;
-        return BUSYBEE_SUCCESS;
-    }
-    catch (po6::error& e)
-    {
-        DEBUG << "exception thrown:  " << e << std::endl;
-        return BUSYBEE_DISRUPTED;
-    }
-}
-
-bool
-CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan, uint64_t new_tag)
-{
-    DEBUG << "setting up a new channel" << std::endl;
-    chan->reset(new_tag, soc);
-#ifdef HAVE_SO_NOSIGPIPE
-    int sigpipeopt = 1;
-    chan->soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
-#endif // HAVE_SO_NOSIGPIPE
-    chan->soc.set_tcp_nodelay();
-    chan->state = channel::CONNECTED;
-#ifdef _MSC_VER
-    FD_SET(chan->soc.get(),&m_epoll);
-#else
-
-    if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
-    {
-        DEBUG << "failed to add file descriptor to epoll" << std::endl;
-        return false;
-    }
-#endif
-
-    char buf[sizeof(uint32_t) + sizeof(uint64_t)];
-    uint32_t sz = (sizeof(uint32_t) + sizeof(uint64_t)) | BBMSG_IDENTIFY;
-    char* tmp = buf;
-    tmp = e::pack32be(sz, tmp);
-    tmp = e::pack64be(m_server_id, tmp);
-
-    if (chan->soc.xwrite(buf, tmp - buf) != tmp - buf)
-    {
-        DEBUG << "failed to send IDENTIFY message" << std::endl;
-        return false;
-    }
-
-    chan->soc.set_nonblocking();
-    pollfd pfd;
-    pfd.fd = chan->soc.get();
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-
-#ifdef _MSC_VER
-    if (WSAPoll(&pfd, 1, 0) > 0)
-#else
-    if (poll(&pfd, 1, 0) > 0)
-#endif
-    {
-        DEBUG << "there's already data available for reading, reading it now" << std::endl;
-        bool need_close = false;
-        bool quiet = false;
-        work_recv(chan, &need_close, &quiet);
-
-        if (need_close)
-        {
-            DEBUG << "need to close the channel; setup failed" << std::endl;
-            return false;
-        }
-    }
-
-    DEBUG << "setup succeeded" << std::endl;
-    return true;
-}
-
-void
-CLASSNAME :: set_mapping(uint64_t server_id, uint64_t chan_tag)
-{
-    m_server2channel.insert(server_id, chan_tag);
-}
-
-#ifdef BUSYBEE_ACCEPT
-void
-CLASSNAME :: work_accept()
-{
-    DEBUG << "accepting new connection";
-    channel* chan = NULL;
-
-    try
-    {
-        po6::net::socket soc;
-        m_listen.accept(&soc);
-
-        if (soc.get() < 0)
-        {
-            DEBUG << "looks like a false accept" << std::endl;
-            return;
-        }
-
-        chan = &m_channels[soc.get()];
-#ifdef BUSYBEE_MULTITHREADED
-        po6::threads::mutex::hold hold(&chan->mtx);
-#endif // BUSYBEE_MULTITHREADED
-        uint64_t new_tag = chan->tag + m_channels_sz;
-        void (channel::*func)(uint64_t) = &channel::reset;
-        e::guard g = e::makeobjguard(*chan, func, new_tag);
-
-        if (!setup_channel(&soc, chan, new_tag))
-        {
-            DEBUG << "failed to setup the channel" << std::endl;
-            return;
-        }
-
-        g.dismiss();
-        DEBUG << "successfully accepted a new connection" << std::endl;
-        return;
-    }
-    catch (po6::error &e)
-    {
-        DEBUG << "exception thrown:  " << e << std::endl;
-        return;
-    }
-}
-#endif // BUSYBEE_ACCEPT
-
-void
-CLASSNAME :: work_close(channel* chan)
-{
-    uint64_t old_tag;
-
-    if (m_server2channel.lookup(chan->id, &old_tag) && chan->tag == old_tag)
-    {
-        m_server2channel.remove(chan->id);
-    }
-
-    DEBUG << "closing " << chan->tag << std::endl;
-    uint64_t new_tag = chan->tag + m_channels_sz;
-    chan->reset(new_tag);
-}
-
-void
-CLASSNAME :: work_recv(channel* chan, bool* need_close, bool* quiet)
-{
-    // If you modify any return path of this function, keep the following in
-    // mind:  If it's an error return, it must set *need_close and optionally
-    // may set *quiet.  In these cases, there is no need to clean up because the
-    // caller will reset the channel.  In a non-error case return, the
-    // recv_queue of the channel must be appended to the global recv_queue.
-
-    DEBUG << "entering work_recv" << std::endl;
-
-    if (*need_close)
-    {
-        DEBUG << "fail:  already need_close" << std::endl;
-        return;
-    }
-
-    assert(chan->soc.get() >= 0);
-    assert(chan->recv_partial_header_sz <= 4);
-
-    while (true)
-    {
-        DEBUG << "top of loop" << std::endl;
-        uint8_t buf[IO_BLOCKSIZE];
-        ssize_t rem;
-
-        // Restore leftovers from last time.
-        if (chan->recv_partial_header_sz)
-        {
-            DEBUG << "copy " << chan->recv_partial_header_sz << " bytes from last loop" << std::endl;
-            memmove(buf, chan->recv_partial_header, chan->recv_partial_header_sz);
-        }
-
-        // Read into our temporary local buffer.
-        int flags = 0;
-#ifdef HAVE_MSG_NOSIGNAL
-        flags |= MSG_NOSIGNAL;
-#endif // HAVE_MSG_NOSIGNAL
-        rem = chan->soc.recv(buf + chan->recv_partial_header_sz, IO_BLOCKSIZE - chan->recv_partial_header_sz, flags);
-        DEBUG << "recv'd " << rem << " bytes" << std::endl;
-
-#ifdef _MSC_VER
-        errno = WSAGetLastError();
-
-        if (rem < 0 && errno != WSAEINTR && errno != WSAEWOULDBLOCK)
-#else
-        if (rem < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
-#endif
-        {
-            DEBUG << "fail:  received an error and it wasn't a kind one errno=" << errno << std::endl;
-            *need_close = true;
-            *quiet = false;
-            return;
-        }
-        else if (rem < 0 && errno == EINTR)
-        {
-            continue;
-        }
-        else if (rem < 0)
-        {
-            DEBUG << "received EINTR, EAGAIN, or EWOULDBLOCK; our work here is done" << std::endl;
-
-            if (chan->recv_queue)
-            {
-                DEBUG << "copying received messages to global queue" << std::endl;
-#ifdef BUSYBEE_MULTITHREADED
-                po6::threads::mutex::hold hold(&m_recv_lock);
-#endif // BUSYBEE_MULTITHREADED
-                *m_recv_end = chan->recv_queue;
-                m_recv_end = chan->recv_end;
-                chan->recv_queue = NULL;
-                chan->recv_end = &chan->recv_queue;
-            }
-
-            return;
-        }
-        else if (rem == 0)
-        {
-            DEBUG << "recv'd 0 bytes, ending connection" << std::endl;
-
-            switch (chan->state)
-            {
-                case channel::NOTCONNECTED:
-                    abort();
-                case channel::CONNECTED:
-                    *need_close = true;
-                    *quiet = false;
-                    return;
-                case channel::IDENTIFIED:
-                case channel::FIN_SENT:
-                case channel::FINACK_SENT:
-                    *need_close = true;
-                    *quiet = false;
-                    return;
-                default:
-                    abort();
-            }
-        }
-
-        DEBUG << "recv'd " << rem << " bytes, so chunking that into messages" << std::endl;
-        // We know rem is >= 0, so add the amount of preexisting data.
-        rem += chan->recv_partial_header_sz;
-        chan->recv_partial_header_sz = 0;
-        uint8_t* data = buf;
-
-        while (rem > 0)
-        {
-            DEBUG << "still need to process " << rem << " bytes" << std::endl;
-
-            if (!chan->recv_partial_msg.get())
-            {
-                DEBUG << "no message in progress" << std::endl;
-
-                if (rem < static_cast<ssize_t>((sizeof(uint32_t))))
-                {
-                    DEBUG << "not enough to make a header" << std::endl;
-                    memmove(chan->recv_partial_header, data, rem);
-                    chan->recv_partial_header_sz = rem;
-                    rem = 0;
-                }
-                else
-                {
-                    DEBUG << "created header" << std::endl;
-                    uint32_t sz;
-                    e::unpack32be(data, &sz);
-                    chan->flags = BBMSG_FLAGS & sz;
-                    sz = BBMSG_MASK & sz;
-                    chan->recv_partial_msg.reset(e::buffer::create(sz));
-                    memmove(chan->recv_partial_msg->data(), data, sizeof(uint32_t));
-                    chan->recv_partial_msg->resize(sizeof(uint32_t));
-                    rem -= sizeof(uint32_t);
-                    data += sizeof(uint32_t);
-                }
-            }
-            else
-            {
-                uint32_t sz = chan->recv_partial_msg->capacity() - chan->recv_partial_msg->size();
-                sz = std::min(static_cast<uint32_t>(rem), sz);
-                DEBUG << "filling in message with " << sz << " bytes" << std::endl;
-                rem -= sz;
-                memmove(chan->recv_partial_msg->data() + chan->recv_partial_msg->size(), data, sz);
-                chan->recv_partial_msg->resize(chan->recv_partial_msg->size() + sz);
-                data += sz;
-
-                if (chan->recv_partial_msg->size() == chan->recv_partial_msg->capacity())
-                {
-                    DEBUG << "processing completed message" << std::endl;
-                    assert(chan->state != channel::NOTCONNECTED);
-
-                    if (((chan->flags & BBMSG_FIN) || (chan->flags & BBMSG_ACK)) &&
-                        chan->recv_partial_msg->size() != sizeof(uint32_t))
-                    {
-                        DEBUG << "closing channel because of an improperly sized FIN or ACK" << std::endl;
-                        *need_close = true;
-                        *quiet = false;
-                        return;
-                    }
-
-                    if ((chan->flags & BBMSG_IDENTIFY))
-                    {
-                        if (chan->state == channel::CONNECTED)
-                        {
-                            DEBUG << "IDENTIFY message received" << std::endl;
-
-                            if (chan->recv_partial_msg->size() != (sizeof(uint32_t) + sizeof(uint64_t)))
-                            {
-                                DEBUG << "IDENTIFY message not sized correctly: " << chan->recv_partial_msg->hex() << std::endl;
-                                *need_close = true;
-                                *quiet = false;
-                                return;
-                            }
-
-                            uint64_t id;
-                            e::unpack64be(chan->recv_partial_msg->data() + sizeof(uint32_t), &id);
-
-                            if (chan->id == 0)
-                            {
-                                DEBUG << "IDENTIFY message specifies server_id=" << id << std::endl;
-                                chan->id = id;
-                                set_mapping(id, chan->tag);
-                            }
-                            else if (chan->id != id)
-                            {
-                                DEBUG << "IDENTIFY message specifies server_id=" << id << ", but channel set to " << chan->id << std::endl;
-                                *need_close = true;
-                                *quiet = false;
-                                return;
-                            }
-
-                            DEBUG << "IDENTIFY success" << std::endl;
-                            chan->state = channel::IDENTIFIED;
-                            // XXX dedupe!
-                        }
-                        else
-                        {
-                            DEBUG << "IDENTIFY message received when already identified" << std::endl;
-                            *need_close = true;
-                            *quiet = false;
-                            return;
-                        }
-                    }
-                    else if ((chan->flags & BBMSG_FIN))
-                    {
-                        switch (chan->state)
-                        {
-                            case channel::IDENTIFIED:
-                                if (!send_fin(chan))
-                                {
-                                    *need_close = true;
-                                    *quiet = false;
-                                    return;
-                                }
-
-                                // Intentional fall-through
-                            case channel::FIN_SENT:
-                                if (!send_ack(chan))
-                                {
-                                    *need_close = true;
-                                    *quiet = false;
-                                    return;
-                                }
-
-                                chan->state = channel::FINACK_SENT;
-                                break;
-                            case channel::CONNECTED:
-                            case channel::FINACK_SENT:
-                                *need_close = true;
-                                *quiet = false;
-                                return;
-                            case channel::NOTCONNECTED:
-                            default:
-                                abort();
-                        }
-                    }
-                    else if ((chan->flags & BBMSG_ACK))
-                    {
-                        switch (chan->state)
-                        {
-                            case channel::FINACK_SENT:
-                                // shutdown quietly to clean up all state
-                                *need_close = true;
-                                return;
-                            case channel::CONNECTED:
-                            case channel::IDENTIFIED:
-                            case channel::FIN_SENT:
-                                *need_close = true;
-                                *quiet = false;
-                                return;
-                            case channel::NOTCONNECTED:
-                            default:
-                                abort();
-                        }
-                    }
-                    else
-                    {
-                        DEBUG << "received new message " << chan->recv_partial_msg->hex() << std::endl;
-                        recv_message* tmp = new recv_message(NULL, chan->id, chan->recv_partial_msg);
-                        *chan->recv_end = tmp;
-                        chan->recv_end = &tmp->next;
-                    }
-
-                    chan->recv_partial_msg.reset();
-                    chan->flags = 0;
-                }
-            }
-        }
-    }
-}
-
-void
-CLASSNAME :: work_send(channel* chan, bool* need_close, bool* quiet)
-{
-    if (*need_close)
-    {
-        return;
-    }
-
-    assert(chan->soc.get() >= 0);
-
-    while (chan->send_queue)
-    {
-        assert(!chan->send_progress.empty());
-
-        int flags = 0;
-#ifdef HAVE_MSG_NOSIGNAL
-        flags |= MSG_NOSIGNAL;
-#endif // HAVE_MSG_NOSIGNAL
-#ifdef _MSC_VER
-        //XXX:  Windows is level triggered, so just send synchronously.
-        u_long mode = 0;
-        if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
-        {
-            *need_close = true;
-            *quiet = false;
-        }
-#endif
-        ssize_t ret = chan->soc.send(chan->send_progress.data(), chan->send_progress.size(), flags);
-#ifdef _MSC_VER
-        mode = 1;
-        if(ioctlsocket(chan->soc.get(), FIONBIO, &mode))
-        {
-            *need_close = true;
-            *quiet = false;
-        }
-        errno = WSAGetLastError();
-        if (ret < 0 && errno != WSAEINTR && errno != WSAEWOULDBLOCK)
-#else
-        if (ret < 0 && errno != EINTR && errno != EWOULDBLOCK)
-#endif
-        {
-            *need_close = true;
-            *quiet = false;
-            return;
-        }
-        else if (ret <= 0 && errno == EINTR)
-        {
-            continue;
-        }
-        else if (ret <= 0)
-        {
-            return;
-        }
-        else
-        {
-            chan->send_progress.advance(ret);
-
-            if (chan->send_progress.empty())
-            {
-                assert(chan->send_queue);
-
-                if (chan->send_queue->next)
-                {
-                    send_message* tmp = chan->send_queue;
-                    chan->send_queue = chan->send_queue->next;
-                    chan->send_progress = chan->send_queue->msg->as_slice();
-                    delete tmp;
-                }
-                else
-                {
-                    delete chan->send_queue;
-                    chan->send_queue = NULL;
-                    chan->send_end = &chan->send_queue;
-                    chan->send_progress = e::slice(NULL, 0);
-                }
-
-            }
-        }
-    }
-
-    return;
-}
-
-bool
-CLASSNAME :: send_fin(channel* chan)
-{
-    std::auto_ptr<e::buffer> msg(e::buffer::create(sizeof(uint32_t)));
-    msg->pack_at(0) << static_cast<uint32_t>(BBMSG_FIN | sizeof(uint32_t));
-    bool empty = !chan->send_queue;
-    send_message* tmp = new send_message(NULL, msg);
-    *chan->send_end = tmp;
-    chan->send_end = &tmp->next;
-
-    if (empty)
-    {
-        chan->send_progress = tmp->msg->as_slice();
-    }
-
-    bool need_close;
-    bool quiet;
-    work_send(chan, &need_close, &quiet);
-    return need_close;
-}
-
-bool
-CLASSNAME :: send_ack(channel* chan)
-{
-    std::auto_ptr<e::buffer> msg(e::buffer::create(sizeof(uint32_t)));
-    msg->pack_at(0) << static_cast<uint32_t>(BBMSG_ACK | sizeof(uint32_t));
-    bool empty = !chan->send_queue;
-    send_message* tmp = new send_message(NULL, msg);
-    *chan->send_end = tmp;
-    chan->send_end = &tmp->next;
-
-    if (empty)
-    {
-        chan->send_progress = tmp->msg->as_slice();
-    }
-
-    bool need_close;
-    bool quiet;
-    work_send(chan, &need_close, &quiet);
-    return need_close;
-}
-
 #ifdef HAVE_EPOLL_CTL
 int
 CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
+    //DEBUG << "epoll_pwait" << std::endl;
     epoll_event ee;
     int ret = epoll_pwait(m_epoll.get(), &ee, 1, m_timeout, &m_sigmask);
     *fd = ee.data.fd;
     *events = ee.events;
     return ret;
 }
-#elif HAVE_KQUEUE
+#endif
+
+#if HAVE_KQUEUE
 int
 CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
+    DEBUG << "kevent" << std::endl;
     struct kevent ee;
     struct timespec to = {0,0}; 
     int ret;
@@ -1762,3 +1009,531 @@ CLASSNAME :: wait_event(int* fd, uint32_t* events)
     return ret;
 }
 #endif
+
+#ifdef BUSYBEE_MULTITHREADED
+void
+CLASSNAME :: up_the_semaphore()
+{
+    ssize_t ret = m_eventfdwrite.write(&m_pipebuf, m_pause_count);
+    assert(ret == (ssize_t) m_pause_count);// XXX cast
+}
+#endif // BUSYBEE_MULTITHREADED
+
+busybee_returncode
+CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_tag)
+{
+    if (m_server2channel.lookup(server_id, _chan_tag))
+    {
+        *_chan = &m_channels[(*_chan_tag) % m_channels_sz];
+        return BUSYBEE_SUCCESS;
+    }
+
+    bool cleanup_needed = false;
+    *_chan = NULL;
+    *_chan_tag = UINT64_MAX;
+
+    try
+    {
+        po6::net::location dst;
+
+        if (!m_mapper->lookup(server_id, &dst))
+        {
+            return BUSYBEE_DISRUPTED;
+        }
+
+        po6::net::socket soc(dst.address.family(), SOCK_STREAM, IPPROTO_TCP);
+        soc.connect(dst);
+        *_chan = &m_channels[soc.get()];
+        (*_chan)->lock();
+        assert((*_chan)->state == channel::NOTCONNECTED);
+        cleanup_needed = true;
+        busybee_returncode rc = setup_channel(&soc, *_chan);
+
+        if (rc != BUSYBEE_SUCCESS)
+        {
+            (*_chan)->reset(m_channels_sz);
+            (*_chan)->unlock();
+            return rc;
+        }
+
+        (*_chan)->id = server_id;
+        m_server2channel.insert(server_id, (*_chan)->tag);
+        // at this point, the channel is fully setup
+        *_chan_tag = (*_chan)->tag;
+        return possibly_work_recv(*_chan);
+    }
+    catch (po6::error& e)
+    {
+        if (cleanup_needed)
+        {
+            (*_chan)->reset(m_channels_sz);
+            (*_chan)->unlock();
+        }
+
+        return BUSYBEE_DISRUPTED;
+    }
+}
+
+busybee_returncode
+CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
+{
+    DEBUG << "setting up a new channel" << std::endl;
+    chan->soc.swap(soc);
+#ifdef HAVE_SO_NOSIGPIPE
+    int sigpipeopt = 1;
+    chan->soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
+#endif // HAVE_SO_NOSIGPIPE
+    chan->soc.set_tcp_nodelay();
+    chan->state = channel::CONNECTED;
+
+    if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
+    {
+        DEBUG << "failed to add file descriptor to epoll" << std::endl;
+        return BUSYBEE_POLLFAILED;
+    }
+
+    char buf[sizeof(uint32_t) + sizeof(uint64_t)];
+    uint32_t sz = (sizeof(uint32_t) + sizeof(uint64_t)) | BBMSG_IDENTIFY;
+    char* tmp = buf;
+    tmp = e::pack32be(sz, tmp);
+    tmp = e::pack64be(m_server_id, tmp);
+
+    if (chan->soc.xwrite(buf, tmp - buf) != tmp - buf)
+    {
+        DEBUG << "failed to send IDENTIFY message" << std::endl;
+        return BUSYBEE_DISRUPTED;
+    }
+
+    chan->soc.set_nonblocking();
+    DEBUG << "setup succeeded" << std::endl;
+    return BUSYBEE_SUCCESS;
+}
+
+busybee_returncode
+CLASSNAME :: possibly_work_recv(channel* chan)
+{
+    pollfd pfd;
+    pfd.fd = chan->soc.get();
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+
+    if (poll(&pfd, 1, 0) > 0)
+    {
+        DEBUG << "there's already data available for reading, reading it now" << std::endl;
+        chan->recver_has_it = true;
+        busybee_returncode rc;
+        chan->unlock();
+
+        if (!work_recv(chan, &rc))
+        {
+            return rc;
+        }
+    }
+    else
+    {
+        chan->unlock();
+    }
+
+    return BUSYBEE_SUCCESS;
+}
+
+#ifdef BUSYBEE_ACCEPT
+void
+CLASSNAME :: work_accept()
+{
+    bool cleanup_needed = false;
+    channel* chan = NULL;
+
+    try
+    {
+        po6::net::socket soc;
+        m_listen.accept(&soc);
+
+        if (soc.get() < 0)
+        {
+            DEBUG << "looks like a false accept" << std::endl;
+            return;
+        }
+
+        chan = &m_channels[soc.get()];
+        chan->lock();
+        assert(chan->state == channel::NOTCONNECTED);
+        cleanup_needed = true;
+        busybee_returncode rc = setup_channel(&soc, chan);
+
+        if (rc != BUSYBEE_SUCCESS)
+        {
+            chan->reset(m_channels_sz);
+            chan->unlock();
+            cleanup_needed = false;
+            DEBUG << "could not setup channel for accept" << std::endl;
+            return;
+        }
+
+        // at this point, the channel is fully setup
+        cleanup_needed = false;
+        possibly_work_recv(chan);
+    }
+    catch (po6::error &e)
+    {
+        if (cleanup_needed)
+        {
+            chan->reset(m_channels_sz);
+            chan->unlock();
+        }
+    }
+}
+#endif // BUSYBEE_ACCEPT
+
+bool
+CLASSNAME :: work_close(channel* chan, busybee_returncode* rc)
+{
+    if (chan->sender_has_it || chan->recver_has_it)
+    {
+        DEBUG << "work_close becomes a NOP as someone else is writing" << std::endl;
+        chan->unlock();
+        return true;
+    }
+
+    uint64_t old_tag = UINT64_MAX;
+
+    if (m_server2channel.lookup(chan->id, &old_tag) && chan->tag == old_tag)
+    {
+        m_server2channel.remove(chan->id);
+    }
+
+    DEBUG << "closing " << chan->tag << std::endl;
+    chan->reset(m_channels_sz);
+    chan->unlock();
+    *rc = BUSYBEE_DISRUPTED;
+    return true;
+}
+
+bool
+CLASSNAME :: work_send(channel* chan, busybee_returncode* rc)
+{
+    uint8_t* data = NULL;
+    size_t data_sz = 0;
+    // msg must always point to the head of send_queue or be NULL
+    e::buffer* msg = NULL;
+
+    chan->lock();
+    chan->need_send = false;
+
+    if (!chan->send_queue)
+    {
+        chan->send_ptr = NULL;
+        chan->sender_has_it = false;
+        chan->unlock();
+        *rc = BUSYBEE_SUCCESS;
+        return true;
+    }
+
+    msg = chan->send_queue->msg.get();
+    chan->unlock();
+
+    while (true)
+    {
+        if (chan->send_ptr < msg->data() ||
+            chan->send_ptr >= msg->data() + msg->size())
+        {
+            chan->send_ptr = msg->data();
+        }
+
+        data = chan->send_ptr;
+        data_sz = (msg->data() + msg->size()) - data;
+        ssize_t ret = chan->soc.send(data, data_sz, SENDRECV_FLAGS);
+
+        if (ret < 0 &&
+            errno != EINTR &&
+            errno != EAGAIN &&
+            errno != EWOULDBLOCK)
+        {
+            chan->lock();
+            chan->state = channel::CRASHING;
+            chan->sender_has_it = false;
+            return work_close(chan, rc);
+        }
+        else if (ret < 0 && errno == EINTR )
+        {
+            continue;
+        }
+        else if (ret < 0) // EAGAIN/EWOULDBLOCK
+        {
+            chan->lock();
+
+            if (chan->need_send)
+            {
+                chan->need_send = false;
+                chan->unlock();
+                continue;
+            }
+            else
+            {
+                chan->sender_has_it = false;
+                chan->unlock();
+                *rc = BUSYBEE_SUCCESS;
+                return true;
+            }
+        }
+        else if (ret == 0)
+        {
+            chan->lock();
+            chan->sender_has_it = false;
+            return work_close(chan, rc);
+        }
+        else
+        {
+            send_message* to_delete = NULL;
+            chan->lock();
+            chan->need_send = false;
+            chan->send_ptr += ret;
+
+            if (chan->send_ptr >= msg->data() + msg->size())
+            {
+                chan->send_ptr = NULL;
+                to_delete = chan->send_queue;
+
+                if (chan->send_queue->next)
+                {
+                    chan->send_queue = chan->send_queue->next;
+                    msg = chan->send_queue->msg.get();
+                }
+                else
+                {
+                    chan->send_queue = NULL;
+                    chan->send_end = &chan->send_queue;
+                    msg = NULL;
+                }
+            }
+
+            bool return_true = false;
+
+            if (!chan->send_queue)
+            {
+                chan->sender_has_it = false;
+                return_true = true;
+            }
+
+            chan->unlock();
+
+            if (to_delete)
+            {
+                delete to_delete;
+            }
+
+            if (return_true)
+            {
+                *rc = BUSYBEE_SUCCESS;
+                return true;
+            }
+        }
+    }
+}
+
+bool
+CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
+{
+    recv_message* recv_queue = NULL;
+    recv_message** recv_end = &recv_queue;
+
+    while (true)
+    {
+        uint8_t buf[IO_BLOCKSIZE];
+
+        // restore leftovers
+        if (chan->recv_partial_header_sz)
+        {
+            DEBUG << "copy " << chan->recv_partial_header_sz << " bytes from last loop" << std::endl;
+            memmove(buf, chan->recv_partial_header, chan->recv_partial_header_sz);
+        }
+
+        // read into buffer
+        uint8_t* tmp_buf = buf + chan->recv_partial_header_sz;
+        size_t tmp_buf_sz = IO_BLOCKSIZE - chan->recv_partial_header_sz;
+        ssize_t rem = chan->soc.recv(tmp_buf, tmp_buf_sz, SENDRECV_FLAGS);
+        DEBUG << "recv'd " << rem << " bytes" << std::endl;
+
+        if (rem < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+        {
+            chan->lock();
+            chan->state = channel::CRASHING;
+            chan->recver_has_it = false;
+            return work_close(chan, rc);
+        }
+        else if (rem < 0 && errno == EINTR )
+        {
+            continue;
+        }
+        else if (rem < 0)
+        {
+            chan->lock();
+
+            if (chan->need_recv)
+            {
+                chan->need_recv = false;
+                chan->unlock();
+                continue;
+            }
+
+            chan->recver_has_it = false;
+            chan->unlock();
+
+            if (recv_queue)
+            {
+                DEBUG << "copying received messages to global queue" << std::endl;
+#ifdef BUSYBEE_MULTITHREADED
+                po6::threads::mutex::hold hold(&m_recv_lock);
+#endif // BUSYBEE_MULTITHREADED
+                *m_recv_end = recv_queue;
+                m_recv_end = recv_end;
+            }
+
+            return true;
+        }
+        else if (rem == 0)
+        {
+            chan->lock();
+            chan->recver_has_it = false;
+            return work_close(chan, rc);
+        }
+
+        DEBUG << "recv'd " << rem << " bytes, so chunking that into messages" << std::endl;
+        // We know rem is >= 0, so add the amount of preexisting data.
+        rem += chan->recv_partial_header_sz;
+        chan->recv_partial_header_sz = 0;
+        uint8_t* data = buf;
+
+        while (rem > 0)
+        {
+            DEBUG << "still need to process " << rem << " bytes" << std::endl;
+
+            if (!chan->recv_partial_msg.get())
+            {
+                DEBUG << "no message in progress" << std::endl;
+
+                if (rem < static_cast<ssize_t>((sizeof(uint32_t))))
+                {
+                    DEBUG << "not enough to make a header" << std::endl;
+                    memmove(chan->recv_partial_header, data, rem);
+                    chan->recv_partial_header_sz = rem;
+                    rem = 0;
+                }
+                else
+                {
+                    DEBUG << "created header" << std::endl;
+                    uint32_t sz;
+                    e::unpack32be(data, &sz);
+                    chan->recv_flags = BBMSG_FLAGS & sz;
+                    sz = BBMSG_SIZE & sz;
+                    chan->recv_partial_msg.reset(e::buffer::create(sz));
+                    memmove(chan->recv_partial_msg->data(), data, sizeof(uint32_t));
+                    chan->recv_partial_msg->resize(sizeof(uint32_t));
+                    rem -= sizeof(uint32_t);
+                    data += sizeof(uint32_t);
+                }
+            }
+            else
+            {
+                uint32_t sz = chan->recv_partial_msg->capacity() - chan->recv_partial_msg->size();
+                sz = std::min(static_cast<uint32_t>(rem), sz);
+                DEBUG << "filling in message with " << sz << " bytes" << std::endl;
+                rem -= sz;
+                memmove(chan->recv_partial_msg->data() + chan->recv_partial_msg->size(), data, sz);
+                chan->recv_partial_msg->resize(chan->recv_partial_msg->size() + sz);
+                data += sz;
+
+                if (chan->recv_partial_msg->size() == chan->recv_partial_msg->capacity())
+                {
+                    if (chan->recv_flags)
+                    {
+                        if (!state_transition(chan, rc))
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        DEBUG << "received new message " << chan->recv_partial_msg->hex() << std::endl;
+                        recv_message* tmp = new recv_message(NULL, chan->id, chan->recv_partial_msg);
+                        *recv_end = tmp;
+                        recv_end = &tmp->next;
+                    }
+
+                    // clear state
+                    chan->recv_partial_header_sz = 0;
+                    chan->recv_partial_msg.reset();
+                    chan->recv_flags = 0;
+                }
+            }
+        }
+
+        DEBUG << "emptied I/O buffer; trying again" << std::endl;
+    }
+}
+
+bool
+CLASSNAME :: state_transition(channel* chan, busybee_returncode* rc)
+{
+    bool need_close = false;
+    bool clean_close = false;
+    chan->lock();
+
+    if ((chan->recv_flags & BBMSG_IDENTIFY))
+    {
+        handle_identify(chan, &need_close, &clean_close);
+    }
+
+    chan->unlock();
+    *rc = BUSYBEE_SUCCESS;
+    return true;
+}
+
+void
+CLASSNAME :: handle_identify(channel* chan,
+                             bool* need_close,
+                             bool* clean_close)
+{
+    if (chan->state == channel::CONNECTED)
+    {
+        DEBUG << "IDENTIFY message received" << std::endl;
+
+        if (chan->recv_partial_msg->size() != (sizeof(uint32_t) + sizeof(uint64_t)))
+        {
+            DEBUG << "IDENTIFY message not sized correctly: " << chan->recv_partial_msg->hex() << std::endl;
+            *need_close = true;
+            *clean_close = false;
+            return;
+        }
+
+        uint64_t id;
+        e::unpack64be(chan->recv_partial_msg->data() + sizeof(uint32_t), &id);
+
+        if (chan->id == 0)
+        {
+            DEBUG << "IDENTIFY message specifies server_id=" << id << std::endl;
+            chan->id = id;
+            m_server2channel.insert(id, chan->tag);
+            // XXX dedupe!
+        }
+        else if (chan->id != id)
+        {
+            DEBUG << "IDENTIFY message specifies server_id=" << id << ", but channel set to " << chan->id << std::endl;
+            *need_close = true;
+            *clean_close = false;
+            return;
+        }
+
+        DEBUG << "IDENTIFY success" << std::endl;
+        chan->state = channel::IDENTIFIED;
+    }
+    else
+    {
+        DEBUG << "IDENTIFY message received when already identified or not connected" << std::endl;
+        *need_close = true;
+        *clean_close = false;
+        return;
+    }
+
+    *need_close = false;
+}
