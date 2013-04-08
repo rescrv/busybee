@@ -62,6 +62,7 @@ class busybee_sta
         void add_signals();
 
     public:
+        busybee_returncode get_addr(uint64_t server_id, po6::net::location* addr);
         int poll_fd();
         busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,

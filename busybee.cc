@@ -631,6 +631,34 @@ busybee_st :: set_external_fd(int fd)
 }
 #endif
 
+busybee_returncode
+CLASSNAME :: get_addr(uint64_t server_id, po6::net::location* addr)
+{
+    channel* chan = NULL;
+    uint64_t chan_tag = UINT64_MAX;
+
+    if (!m_server2channel.lookup(server_id, &chan_tag))
+    {
+        return BUSYBEE_DISRUPTED;
+    }
+
+    chan = &m_channels[(chan_tag) % m_channels_sz];
+#ifdef BUSYBEE_MULTITHREADED
+    po6::threads::mutex::hold hold(&chan->mtx);
+#endif
+
+    try
+    {
+        *addr = chan->soc.getpeername();
+        return BUSYBEE_SUCCESS;
+    }
+    catch (po6::error& e)
+    {
+        errno = e;
+        return BUSYBEE_DISRUPTED;
+    }
+}
+
 #ifdef BUSYBEE_MULTITHREADED
 bool
 CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
