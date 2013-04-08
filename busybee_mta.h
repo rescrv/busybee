@@ -117,6 +117,8 @@ class busybee_mta
         e::lockfree_hash_map<uint64_t, uint64_t, e::hash_map_id> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
+        po6::threads::mutex m_anon_lock;
+        uint32_t m_anon_id;
         int m_timeout;
         po6::threads::mutex m_recv_lock;
         recv_message* m_recv_queue;

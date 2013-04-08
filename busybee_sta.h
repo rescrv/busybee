@@ -98,6 +98,7 @@ class busybee_sta
         e::lockfree_hash_map<uint64_t, uint64_t, e::hash_map_id> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
+        uint32_t m_anon_id;
         int m_timeout;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;

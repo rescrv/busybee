@@ -72,7 +72,7 @@ parse_args(int argc, const char* argv[],
     *bind_to = po6::net::location();
     *server_id = 0;
 
-    for (size_t i = 1; i < argc; i += 3)
+    for (int i = 1; i < argc; i += 3)
     {
         uint64_t id = atoi(argv[i]);
         po6::net::location loc(argv[i + 1], atoi(argv[i + 2]));

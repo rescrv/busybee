@@ -83,5 +83,7 @@ busybee_discover(po6::net::ipaddr* ip)
 uint64_t
 busybee_generate_id()
 {
-    return e::time(); // XXX weak!
+    uint64_t x = 1;
+    x <<= 32;
+    return x | e::time(); // XXX weak!
 }

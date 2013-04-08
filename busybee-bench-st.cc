@@ -50,7 +50,7 @@ main(int argc, const char* argv[])
     membership_list ml;
     ml.push_back(std::make_pair(server_id, loc));
     benchmapper bm(&ml);
-    busybee_st bb(&bm, 0xdeadbeefcafebabeULL);
+    busybee_st bb(&bm, 0);
 
     for (uint64_t i = 0; i < iter; ++i)
     {

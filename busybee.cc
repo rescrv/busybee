@@ -367,6 +367,8 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_server2channel(10)
     , m_mapper(mapper)
     , m_server_id(server_id)
+    , m_anon_lock()
+    , m_anon_id(1)
     , m_timeout(-1)
     , m_recv_lock()
     , m_recv_queue(NULL)
@@ -383,6 +385,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_pause_paused(false)
     , m_pause_num(0)
 {
+    assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
     po6::threads::mutex::hold holdr(&m_recv_lock);
     po6::threads::mutex::hold holdp(&m_pause_lock);
 
@@ -439,11 +442,14 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
     , m_server2channel(10)
     , m_mapper(mapper)
     , m_server_id(server_id)
+    , m_anon_id(1)
     , m_timeout(-1)
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
     , m_sigmask()
 {
+    assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
+
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
@@ -480,12 +486,15 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     , m_server2channel(10)
     , m_mapper(mapper)
     , m_server_id(server_id)
+    , m_anon_id(1)
     , m_timeout(-1)
     , m_external(-1)
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
     , m_sigmask()
 {
+    assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
+
     if (m_epoll.get() < 0)
     {
         throw po6::error(errno);
@@ -1507,6 +1516,28 @@ CLASSNAME :: handle_identify(channel* chan,
 
         uint64_t id;
         e::unpack64be(chan->recv_partial_msg->data() + sizeof(uint32_t), &id);
+
+        if (id == 0)
+        {
+#ifdef BUSYBEE_MULTITHREADED
+            po6::threads::mutex::hold hold(&m_anon_lock);
+#endif // BUSYBEE_MULTITHREADED
+
+            while (m_server2channel.contains(id))
+            {
+                ++m_anon_id;
+            }
+
+            id = m_anon_id;
+            ++m_anon_id;
+        }
+        else if (id < (1ULL << 32))
+        {
+            DEBUG << "IDENTIFY message specifies server_id=" << id << ", which is less than 1<<32" << std::endl;
+            *need_close = true;
+            *clean_close = false;
+            return;
+        }
 
         if (chan->id == 0)
         {
