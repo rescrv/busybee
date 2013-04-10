@@ -924,6 +924,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         // mark the methods we have it for
         chan->sender_has_it = chan->sender_has_it || sender_has_it;
         chan->recver_has_it = chan->recver_has_it || recver_has_it;
+        uint64_t _id = chan->id;
         chan->unlock();
 
         busybee_returncode rc;
@@ -932,7 +933,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         {
             if (!work_send(chan, &rc))
             {
-                *id = UINT64_MAX;
+                *id = _id;
                 msg->reset();
                 return rc;
             }
@@ -942,7 +943,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         {
             if (!work_recv(chan, &rc))
             {
-                *id = UINT64_MAX;
+                *id = _id;
                 msg->reset();
                 return rc;
             }
@@ -1242,7 +1243,7 @@ CLASSNAME :: work_close(channel* chan, busybee_returncode* rc)
     chan->reset(m_channels_sz);
     chan->unlock();
     *rc = BUSYBEE_DISRUPTED;
-    return true;
+    return false;
 }
 
 bool
