@@ -1121,6 +1121,7 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
     int sigpipeopt = 1;
     chan->soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
 #endif // HAVE_SO_NOSIGPIPE
+    chan->soc.set_tcp_nodelay();
     chan->state = channel::CONNECTED;
 
     if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
