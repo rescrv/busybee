@@ -45,7 +45,23 @@
 
 busybee_single :: busybee_single(const po6::net::hostname& host)
     : m_timeout(-1)
+    , m_type(USE_HOSTNAME)
     , m_host(host)
+    , m_loc()
+    , m_remote()
+    , m_connection()
+    , m_recv_partial_header_sz()
+    , m_recv_partial_msg()
+    , m_flags(0)
+    , m_token(0)
+{
+}
+
+busybee_single :: busybee_single(const po6::net::location& loc)
+    : m_timeout(-1)
+    , m_type(USE_LOCATION)
+    , m_host()
+    , m_loc(loc)
     , m_remote()
     , m_connection()
     , m_recv_partial_header_sz()
@@ -57,6 +73,12 @@ busybee_single :: busybee_single(const po6::net::hostname& host)
 
 busybee_single :: ~busybee_single() throw ()
 {
+}
+
+void
+busybee_single :: set_timeout(int timeout)
+{
+    m_timeout = timeout;
 }
 
 busybee_returncode
@@ -71,7 +93,21 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
 
     if (m_connection.get() < 0)
     {
-        m_remote = m_host.connect(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &m_connection);
+        if (m_type == USE_HOSTNAME)
+        {
+            m_remote = m_host.connect(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &m_connection);
+        }
+        else if (m_type == USE_LOCATION)
+        {
+            m_connection.reset(m_loc.address.family(), SOCK_STREAM, IPPROTO_TCP);
+            m_connection.connect(m_loc);
+            m_remote = m_connection.getpeername();
+        }
+        else
+        {
+            abort();
+        }
+
 #ifdef HAVE_SO_NOSIGPIPE
         int sigpipeopt = 1;
         soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
@@ -81,7 +117,7 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
         sz |= 0x80000000ULL;
         char* ptr = buf;
         ptr = e::pack32be(sz, ptr);
-        ptr = e::pack64be(e::time(), ptr);
+        ptr = e::pack64be(0, ptr);
 
         if (m_connection.xwrite(buf, ptr - buf) != ptr - buf)
         {

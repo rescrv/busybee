@@ -44,6 +44,7 @@ class busybee_single
 {
     public:
         busybee_single(const po6::net::hostname& host);
+        busybee_single(const po6::net::location& host);
         ~busybee_single() throw ();
 
     public:
@@ -71,7 +72,9 @@ class busybee_single
 
     private:
         int m_timeout;
+        enum { USE_HOSTNAME, USE_LOCATION } m_type;
         po6::net::hostname m_host;
+        po6::net::location m_loc;
         po6::net::location m_remote;
         po6::net::socket m_connection;
         uint32_t m_recv_partial_header_sz;
