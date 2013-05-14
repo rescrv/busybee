@@ -27,6 +27,9 @@
 
 // POSIX
 #ifndef _MSC_VER
+#ifdef __FreeBSD__
+#include <sys/types.h>
+#endif
 #include <ifaddrs.h>
 #endif
 
