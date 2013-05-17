@@ -1464,6 +1464,15 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
                     e::unpack32be(data, &sz);
                     chan->recv_flags = BBMSG_FLAGS & sz;
                     sz = BBMSG_SIZE & sz;
+
+                    if (sz < sizeof(uint32_t))
+                    {
+                        chan->lock();
+                        chan->state = channel::CRASHING;
+                        chan->recver_has_it = false;
+                        return work_close(chan, rc);
+                    }
+
                     chan->recv_partial_msg.reset(e::buffer::create(sz));
                     memmove(chan->recv_partial_msg->data(), data, sizeof(uint32_t));
                     chan->recv_partial_msg->resize(sizeof(uint32_t));
