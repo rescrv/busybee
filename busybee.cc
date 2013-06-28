@@ -240,7 +240,7 @@ class HIDDEN CLASSNAME::channel
         void initialize(po6::net::socket* soc);
 
     public:
-        enum { NOTCONNECTED, CONNECTED, IDENTIFIED, CRASHING } state;
+        enum { NOTCONNECTED, CONNECTED, IDENTIFIED, CRASHING, EXTERNAL } state;
         uint64_t id;
         uint64_t tag;
         po6::net::socket soc;
@@ -488,7 +488,6 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     , m_server_id(server_id)
     , m_anon_id(1)
     , m_timeout(-1)
-    , m_external(-1)
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
     , m_sigmask()
@@ -620,13 +619,22 @@ CLASSNAME :: unset_ignore_signals()
 busybee_returncode
 busybee_st :: set_external_fd(int fd)
 {
-    if (add_event(fd, EPOLLIN) < 0)
+    channel* chan = &m_channels[fd];
+    chan->lock();
+
+    if (chan->state == channel::EXTERNAL)
+    {
+        chan->unlock();
+        return BUSYBEE_EXTERNAL;
+    }
+
+    if (add_event(fd, EPOLLIN) < 0 && errno != EEXIST)
     {
         DEBUG << "failed to add file descriptor to epoll" << std::endl;
         return BUSYBEE_POLLFAILED;
     }
 
-    m_external = fd;
+    chan->unlock();
     return BUSYBEE_SUCCESS;
 }
 #endif
@@ -895,18 +903,18 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         }
 #endif // BUSYBEE_ACCEPT
 
-#ifdef BUSYBEE_ST
-        if (fd == m_external)
-        {
-            return BUSYBEE_EXTERNAL;
-        }
-#endif // BUSYBEE_ST
-
         DEBUG << "processing fd=" << fd << " events=" << events << std::endl;
         channel* chan = &m_channels[fd];
 
         // acquire relevant read/write locks
         chan->lock();
+
+        if (chan->state == channel::EXTERNAL)
+        {
+            chan->unlock();
+            *id = fd;
+            return BUSYBEE_EXTERNAL;
+        }
 
         if (chan->state < channel::CONNECTED ||
             chan->state > channel::IDENTIFIED)

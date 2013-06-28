@@ -105,7 +105,6 @@ class busybee_st
         uint64_t m_server_id;
         uint32_t m_anon_id;
         int m_timeout;
-        int m_external;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
         sigset_t m_sigmask;
