@@ -624,9 +624,12 @@ busybee_st :: set_external_fd(int fd)
 
     if (chan->state == channel::EXTERNAL)
     {
+        DEBUG << "fd=" << fd << " already in EXTERNAL state" << std::endl;
         chan->unlock();
-        return BUSYBEE_EXTERNAL;
+        return BUSYBEE_SUCCESS;
     }
+
+    assert(chan->state == channel::NOTCONNECTED);
 
     if (add_event(fd, EPOLLIN) < 0 && errno != EEXIST)
     {
@@ -634,6 +637,8 @@ busybee_st :: set_external_fd(int fd)
         return BUSYBEE_POLLFAILED;
     }
 
+    DEBUG << "setting fd=" << fd << " to EXTERNAL state" << std::endl;
+    chan->state = channel::EXTERNAL;
     chan->unlock();
     return BUSYBEE_SUCCESS;
 }
@@ -908,6 +913,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
         // acquire relevant read/write locks
         chan->lock();
+        DEBUG << "channel in state=" << static_cast<unsigned>(chan->state) << std::endl;
 
         if (chan->state == channel::EXTERNAL)
         {
