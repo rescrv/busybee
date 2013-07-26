@@ -30,9 +30,9 @@
 #endif
 
 #ifdef BUSYBEE_DEBUG
-#define DEBUG std::cerr << __FILE__ << ":" << __LINE__ << " "
+#define DEBUG std::cerr << __FILE__ << ":" << __LINE__ << " " << this << " "
 #else
-#define DEBUG if (0) std::cerr << __FILE__ << ":" << __LINE__ << " "
+#define DEBUG if (0) std::cerr << __FILE__ << ":" << __LINE__ << " " << this << " "
 #endif
 
 #ifndef __STDC_LIMIT_MACROS
