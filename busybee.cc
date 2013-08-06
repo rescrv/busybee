@@ -782,6 +782,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
     bool need_to_pause = false;
 #endif // BUSYBEE_MULTITHREADED
     //DEBUG << "recv(" << id << ", " << msg << ")" << std::endl;
+    *id = 0;
 
     while (true)
     {
