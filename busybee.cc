@@ -140,7 +140,7 @@
 
 #ifdef HAVE_EPOLL_CTL
 #define EPOLL_CREATE(N) epoll_create(N)
-#elif HAVE_KQUEUE
+#elif defined HAVE_KQUEUE
 #define EPOLL_CREATE(N) kqueue()
 #endif
 
@@ -1014,7 +1014,7 @@ CLASSNAME :: wait_event(int* fd, uint32_t* events)
 }
 #endif
 
-#if HAVE_KQUEUE
+#ifdef HAVE_KQUEUE
 int
 CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
@@ -1068,7 +1068,7 @@ void
 CLASSNAME :: up_the_semaphore()
 {
     ssize_t ret = m_eventfdwrite.write(&m_pipebuf, m_pause_count);
-    assert(ret == (ssize_t) m_pause_count);// XXX cast
+    assert(ret == static_cast<ssize_t>(m_pause_count));
 }
 #endif // BUSYBEE_MULTITHREADED
 
