@@ -46,5 +46,6 @@ AC_ARG_ENABLE([benchmarks], [AS_HELP_STRING([--enable-benchmarks],
 AM_CONDITIONAL([ENABLE_BENCHMARKS], [test x"${enable_benchmarks}" = xyes])
 
 AC_CONFIG_FILES([Makefile
-                 busybee.pc])
+                 busybee.pc
+                 busybee.upack])
 AC_OUTPUT
