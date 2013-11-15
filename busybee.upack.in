@@ -1,0 +1,34 @@
+package libbusybee
+| debian name="libbusybee1"
+| debian source="busybee"
+| version="@VERSION@"
+| release="1"
+| license="BSD"
+| copyright="2011-2013 Cornell University"
+| homepage="http://hyperdex.org"
+| tarball="http://hyperdex.org/src/busybee-{version}.tar.gz"
+| debian section="libs"
+| configure="--disable-static"
+| debian build-requires="pkg-config, libpo6-dev, libe-dev"
+| fedora build-requires="pkgconfig libpo6-devel libe-devel"
+| summary="A messaging library for distributed systems"
++ {libdir}/libbusybee.so.1
++ {libdir}/libbusybee.so.1.0.0
+'''A messaging library for distributed systems'''
+
+subpackage libbusybee-devel
+| debian name="libbusybee-dev"
+| debian requires="libpo6-dev, libe-dev"
+| fedora requires="libpo6-devel libe-devel"
++ {includedir}/busybee_constants.h
++ {includedir}/busybee_mapper.h
++ {includedir}/busybee_mta.h
++ {includedir}/busybee_returncode.h
++ {includedir}/busybee_single.h
++ {includedir}/busybee_sta.h
++ {includedir}/busybee_st.h
++ {includedir}/busybee_utils.h
++ {libdir}/libbusybee.so
++ {libdir}/pkgconfig/busybee.pc
+
+exclude {libdir}/libbusybee.la
