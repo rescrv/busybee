@@ -18,8 +18,8 @@ package libbusybee
 
 subpackage libbusybee-devel
 | debian name="libbusybee-dev"
-| debian requires="libpo6-dev, libe-dev"
-| fedora requires="libpo6-devel libe-devel"
+| debian requires="libpo6-dev, libe-dev, libbusybee1 {self}"
+| fedora requires="libpo6-devel libe-devel libbusybee{self}"
 + {includedir}/busybee_constants.h
 + {includedir}/busybee_mapper.h
 + {includedir}/busybee_mta.h
