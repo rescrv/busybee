@@ -1,6 +1,6 @@
 package libbusybee
+| source="busybee"
 | debian name="libbusybee1"
-| debian source="busybee"
 | version="@VERSION@"
 | release="1"
 | license="BSD"
