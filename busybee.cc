@@ -706,16 +706,9 @@ CLASSNAME :: drop(uint64_t server_id)
 
     chan = &m_channels[(chan_tag) % m_channels_sz];
     chan->lock();
-
-    if (chan->sender_has_it || chan->recver_has_it)
-    {
-        chan->state = channel::CRASHING; // XXX
-    }
-    else
-    {
-        chan->reset(m_channels_sz);
-    }
-
+    chan->state = channel::CRASHING;
+    busybee_returncode rc;
+    work_close(chan, &rc);
     chan->unlock();
     return BUSYBEE_SUCCESS;
 }
