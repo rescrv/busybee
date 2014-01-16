@@ -99,7 +99,8 @@ class busybee_mta
         void BUSYBEE_HIDDEN up_the_semaphore();
         busybee_returncode BUSYBEE_HIDDEN get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
         busybee_returncode BUSYBEE_HIDDEN setup_channel(po6::net::socket* soc, channel* chan);
-        busybee_returncode BUSYBEE_HIDDEN possibly_work_recv(channel* chan);
+        busybee_returncode BUSYBEE_HIDDEN possibly_work_send_or_recv(channel* chan);
+        bool BUSYBEE_HIDDEN work_dispatch(channel* chan, uint32_t events, busybee_returncode* rc);
         void BUSYBEE_HIDDEN work_accept();
         bool BUSYBEE_HIDDEN work_close(channel* chan, busybee_returncode* rc);
         bool BUSYBEE_HIDDEN work_send(channel* chan, busybee_returncode* rc);

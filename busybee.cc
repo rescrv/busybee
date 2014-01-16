@@ -923,38 +923,15 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
             continue;
         }
 
-        // each bool says whether this thread should read/write
-        bool sender_has_it = !chan->sender_has_it && ((events & EPOLLOUT) || (events & EPOLLERR));
-        bool recver_has_it = !chan->recver_has_it && ((events & EPOLLIN) || (events & EPOLLHUP));
-        // if another thread is writing, record our event
-        chan->need_send = chan->sender_has_it && ((events & EPOLLOUT) || (events & EPOLLERR));
-        chan->need_recv = chan->recver_has_it && ((events & EPOLLIN) || (events & EPOLLHUP));
-        // mark the methods we have it for
-        chan->sender_has_it = chan->sender_has_it || sender_has_it;
-        chan->recver_has_it = chan->recver_has_it || recver_has_it;
         uint64_t _id = chan->id;
-        chan->unlock();
-
         busybee_returncode rc;
 
-        if (sender_has_it)
+        // this call unlocks chan
+        if (!work_dispatch(chan, events, &rc))
         {
-            if (!work_send(chan, &rc))
-            {
-                *id = _id;
-                msg->reset();
-                return rc;
-            }
-        }
-
-        if (recver_has_it)
-        {
-            if (!work_recv(chan, &rc))
-            {
-                *id = _id;
-                msg->reset();
-                return rc;
-            }
+            *id = _id;
+            msg->reset();
+            return rc;
         }
     }
 }
@@ -1088,7 +1065,22 @@ CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_ta
         }
 
         po6::net::socket soc(dst.address.family(), SOCK_STREAM, IPPROTO_TCP);
-        soc.connect(dst);
+        soc.set_nonblocking();
+
+        try
+        {
+            // Wouldn't it be great to refactor and get rid of exceptions?  Yes,
+            // but not worth the cost now.
+            soc.connect(dst);
+        }
+        catch (po6::error& e)
+        {
+            if (e != EINPROGRESS)
+            {
+                throw e;
+            }
+        }
+
         *_chan = &m_channels[soc.get()];
         (*_chan)->lock();
         assert((*_chan)->state == channel::NOTCONNECTED);
@@ -1106,7 +1098,7 @@ CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_ta
         m_server2channel.insert(server_id, (*_chan)->tag);
         // at this point, the channel is fully setup
         *_chan_tag = (*_chan)->tag;
-        return possibly_work_recv(*_chan);
+        return possibly_work_send_or_recv(*_chan);
     }
     catch (po6::error& e)
     {
@@ -1130,6 +1122,7 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
     chan->soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
 #endif // HAVE_SO_NOSIGPIPE
     chan->soc.set_tcp_nodelay();
+    chan->soc.set_nonblocking();
     chan->state = channel::CONNECTED;
 
     if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
@@ -1138,39 +1131,37 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
         return BUSYBEE_POLLFAILED;
     }
 
-    char buf[sizeof(uint32_t) + sizeof(uint64_t)];
+    std::auto_ptr<e::buffer> msg;
+    msg.reset(e::buffer::create(sizeof(uint32_t) + sizeof(uint64_t)));
     uint32_t sz = (sizeof(uint32_t) + sizeof(uint64_t)) | BBMSG_IDENTIFY;
-    char* tmp = buf;
-    tmp = e::pack32be(sz, tmp);
-    tmp = e::pack64be(m_server_id, tmp);
+    *msg << sz << m_server_id;
+    std::auto_ptr<send_message> sm(new send_message(NULL, msg));
 
-    if (chan->soc.xwrite(buf, tmp - buf) != tmp - buf)
-    {
-        DEBUG << "failed to send IDENTIFY message" << std::endl;
-        return BUSYBEE_DISRUPTED;
-    }
-
-    chan->soc.set_nonblocking();
-    DEBUG << "setup succeeded" << std::endl;
+    *chan->send_end = sm.get();
+    chan->send_end = &sm->next;
+    sm.release();
     return BUSYBEE_SUCCESS;
 }
 
 busybee_returncode
-CLASSNAME :: possibly_work_recv(channel* chan)
+CLASSNAME :: possibly_work_send_or_recv(channel* chan)
 {
     pollfd pfd;
     pfd.fd = chan->soc.get();
-    pfd.events = POLLIN;
+    pfd.events = POLLIN|POLLOUT|POLLERR|POLLHUP;
     pfd.revents = 0;
 
     if (poll(&pfd, 1, 0) > 0)
     {
-        DEBUG << "there's already data available for reading, reading it now" << std::endl;
-        chan->recver_has_it = true;
+        DEBUG << "there's already activity, acting on it now" << std::endl;
+        uint32_t events = 0;
+        if ((pfd.revents & POLLIN)) events |= EPOLLIN;
+        if ((pfd.revents & POLLOUT)) events |= EPOLLOUT;
+        if ((pfd.revents & POLLERR)) events |= EPOLLERR;
+        if ((pfd.revents & POLLHUP)) events |= EPOLLHUP;
         busybee_returncode rc;
-        chan->unlock();
 
-        if (!work_recv(chan, &rc))
+        if (!work_dispatch(chan, events, &rc))
         {
             return rc;
         }
@@ -1181,6 +1172,39 @@ CLASSNAME :: possibly_work_recv(channel* chan)
     }
 
     return BUSYBEE_SUCCESS;
+}
+
+bool
+CLASSNAME :: work_dispatch(channel* chan, uint32_t events, busybee_returncode* rc)
+{
+    // each bool says whether this thread should read/write
+    bool sender_has_it = !chan->sender_has_it && ((events & EPOLLOUT) || (events & EPOLLERR));
+    bool recver_has_it = !chan->recver_has_it && ((events & EPOLLIN) || (events & EPOLLHUP));
+    // if another thread is writing, record our event
+    chan->need_send = chan->sender_has_it && ((events & EPOLLOUT) || (events & EPOLLERR));
+    chan->need_recv = chan->recver_has_it && ((events & EPOLLIN) || (events & EPOLLHUP));
+    // mark the methods we have it for
+    chan->sender_has_it = chan->sender_has_it || sender_has_it;
+    chan->recver_has_it = chan->recver_has_it || recver_has_it;
+    chan->unlock();
+
+    if (sender_has_it)
+    {
+        if (!work_send(chan, rc))
+        {
+            return false;
+        }
+    }
+
+    if (recver_has_it)
+    {
+        if (!work_recv(chan, rc))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 #ifdef BUSYBEE_ACCEPT
@@ -1218,7 +1242,7 @@ CLASSNAME :: work_accept()
 
         // at this point, the channel is fully setup
         cleanup_needed = false;
-        possibly_work_recv(chan);
+        possibly_work_send_or_recv(chan);
     }
     catch (po6::error &e)
     {
