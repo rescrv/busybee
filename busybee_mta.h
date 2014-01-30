@@ -89,8 +89,8 @@ class busybee_mta
 
     private:
         class channel;
-        class recv_message;
-        class send_message;
+        struct recv_message;
+        struct send_message;
 
     private:
         int BUSYBEE_HIDDEN add_event(int fd, uint32_t events);
