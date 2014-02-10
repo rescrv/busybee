@@ -74,15 +74,16 @@ class busybee_st
 
     private:
         class channel;
-        class recv_message;
-        class send_message;
+        struct recv_message;
+        struct send_message;
 
     private:
         int BUSYBEE_HIDDEN add_event(int fd, uint32_t events);
         int BUSYBEE_HIDDEN wait_event(int* fd, uint32_t* events);
         busybee_returncode BUSYBEE_HIDDEN get_channel(uint64_t server_id, channel** chan, uint64_t* chan_tag);
         busybee_returncode BUSYBEE_HIDDEN setup_channel(po6::net::socket* soc, channel* chan);
-        busybee_returncode BUSYBEE_HIDDEN possibly_work_recv(channel* chan);
+        busybee_returncode BUSYBEE_HIDDEN possibly_work_send_or_recv(channel* chan);
+        bool BUSYBEE_HIDDEN work_dispatch(channel* chan, uint32_t events, busybee_returncode* rc);
         bool BUSYBEE_HIDDEN work_close(channel* chan, busybee_returncode* rc);
         bool BUSYBEE_HIDDEN work_send(channel* chan, busybee_returncode* rc);
         bool BUSYBEE_HIDDEN work_recv(channel* chan, busybee_returncode* rc);
