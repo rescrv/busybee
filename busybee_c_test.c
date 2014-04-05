@@ -50,19 +50,24 @@ int main()
 
     const char* msg = "Hello Derek what's up";
     rc = busybee_mta_send(bb_one, sid_two, msg, strlen(msg));
-    check(rc == BUSYBEE_SUCCESS, printf("Send failed: %d\n", rc));
+    check(rc == BUSYBEE_SUCCESS, printf("send() failed: %d\n", rc));
 
     uint64_t from;
     const char* reply;
     size_t reply_sz;
     rc = busybee_mta_recv(bb_two, &from, &reply, &reply_sz);
-    check(rc == BUSYBEE_SUCCESS, printf("Recv failed: %d\n", rc));
-    printf("%.*s\n", (int) reply_sz, reply);
-    printf("Got reply_sz: %zu from %ld\n", reply_sz, from);
-    check(from == sid_one, printf("Sender's server id isn't the correct value.\n"));
+    check(rc == BUSYBEE_SUCCESS, printf("recv() failed: %d\n", rc));
+    check(reply_sz == strlen(msg),
+          printf("reply's size doesn't match the size of the sent message\n"));
+    check(memcmp(msg, reply, reply_sz) == 0,
+          printf("reply (%*.s) doesn't match the sent message (%s)\n",
+                 (int) reply_sz, reply, msg));
+    check(from == sid_one, printf("sender's server id isn't the correct value\n"));
 
     busybee_mta_delete(bb_one);
     busybee_mta_delete(bb_two);
+
+    printf("All tests passed.\n");
     
     return EXIT_SUCCESS;
 }
