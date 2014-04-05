@@ -13,7 +13,8 @@ static int const num_threads = 2;
 
 
 int
-lookup(uint64_t server_id,
+lookup(void* user_data,
+       uint64_t server_id,
        const char** address,
        uint16_t *port)
 {
@@ -25,7 +26,7 @@ lookup(uint64_t server_id,
 
 int main()
 {
-    busybee_mapper* mapper = busybee_mapper_create(&lookup);
+    busybee_mapper* mapper = busybee_mapper_create(NULL, &lookup);
     
     uint64_t sid_one = (1ULL << 32);
     busybee_mta* bb_one = busybee_mta_create(mapper, server_addrs[0],

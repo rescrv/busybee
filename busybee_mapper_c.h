@@ -10,11 +10,13 @@ extern "C" {
 
 typedef struct busybee_mapper busybee_mapper;
 
-typedef int (*lookup_func_t)(uint64_t server_id,
+typedef int (*lookup_func_t)(void* user_data,
+                             uint64_t server_id,
                              const char **address,
                              uint16_t *port);
 
-busybee_mapper* busybee_mapper_create(lookup_func_t lookup);
+busybee_mapper* busybee_mapper_create(void* user_data,
+                                      lookup_func_t lookup);
 
 #ifdef __cplusplus
 }
