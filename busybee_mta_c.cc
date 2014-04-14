@@ -134,7 +134,7 @@ busybee_returncode busybee_mta_recv(busybee_mta* bb,
     void* msg_cp = malloc(*msg_sz);
     memcpy(msg_cp,
            buf->data() + BUSYBEE_HEADER_SIZE,
-           buf->size() - BUSYBEE_HEADER_SIZE);
+           *msg_sz);
     *msg = (char*) msg_cp;
 
     return BUSYBEE_SUCCESS;
