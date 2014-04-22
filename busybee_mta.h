@@ -125,6 +125,8 @@ class busybee_mta
         po6::threads::mutex m_recv_lock;
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
+        recv_message* m_recv_queue_setaside;
+        recv_message** m_recv_end_setaside;
         sigset_t m_sigmask;
         char* m_pipebuf;
         po6::io::fd m_eventfdread;
@@ -134,7 +136,7 @@ class busybee_mta
         po6::threads::cond m_pause_may_unpause;
         bool m_shutdown;
         size_t m_pause_count;
-        bool m_pause_paused;
+        uint32_t m_pause_paused;
         size_t m_pause_num;
 
     private:

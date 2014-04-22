@@ -373,6 +373,8 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_recv_lock()
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
+    , m_recv_queue_setaside(NULL)
+    , m_recv_end_setaside(NULL)
     , m_sigmask()
     , m_pipebuf(new char[num_threads])
     , m_eventfdread()
@@ -382,12 +384,13 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_pause_may_unpause(&m_pause_lock)
     , m_shutdown(false)
     , m_pause_count(num_threads)
-    , m_pause_paused(false)
+    , m_pause_paused(0)
     , m_pause_num(0)
 {
     assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
     po6::threads::mutex::hold holdr(&m_recv_lock);
     po6::threads::mutex::hold holdp(&m_pause_lock);
+    e::atomic::store_32_nobarrier(&m_pause_paused, 0);
 
     if (m_epoll.get() < 0)
     {
@@ -559,9 +562,18 @@ void
 CLASSNAME :: pause()
 {
     po6::threads::mutex::hold hold(&m_pause_lock);
-    m_pause_paused = true;
+    assert(e::atomic::load_32_nobarrier(&m_pause_paused) == 0);
+    e::atomic::store_32_nobarrier(&m_pause_paused, 1);
     DEBUG << "pause called" << std::endl;
     up_the_semaphore();
+
+    // switch out the queue of messages so that threads pause quicker
+    m_recv_lock.lock();
+    m_recv_queue_setaside = m_recv_queue;
+    m_recv_end_setaside = m_recv_end;
+    m_recv_queue = NULL;
+    m_recv_end = &m_recv_queue;
+    m_recv_lock.unlock();
 
     while (m_pause_num < m_pause_count)
     {
@@ -577,8 +589,15 @@ CLASSNAME :: unpause()
 {
     po6::threads::mutex::hold hold(&m_pause_lock);
     DEBUG << "unpause called" << std::endl;
-    m_pause_paused = false;
+    e::atomic::store_32_nobarrier(&m_pause_paused, 0);
     m_pause_may_unpause.broadcast();
+    // restore our switched-out queue
+    m_recv_lock.lock();
+    *m_recv_end = m_recv_queue_setaside;
+    m_recv_end = m_recv_end_setaside;
+    m_recv_queue_setaside = NULL;
+    m_recv_end_setaside = NULL;
+    m_recv_lock.unlock();
 }
 
 void
@@ -780,12 +799,14 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
     while (true)
     {
 #ifdef BUSYBEE_MULTITHREADED
-        if (need_to_pause)
+        if (need_to_pause ||
+            e::atomic::load_32_nobarrier(&m_pause_paused) != 0)
         {
             bool did_we_pause = false;
             po6::threads::mutex::hold hold(&m_pause_lock);
 
-            while (m_pause_paused && !m_shutdown)
+            while (e::atomic::load_32_nobarrier(&m_pause_paused) != 0 &&
+                   !m_shutdown)
             {
                 ++m_pause_num;
                 assert(m_pause_num <= m_pause_count);
