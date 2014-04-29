@@ -356,7 +356,8 @@ CLASSNAME :: channel :: reset(size_t channels_sz)
 ///////////////////////////////// BusyBee Class ////////////////////////////////
 
 #ifdef BUSYBEE_MTA
-busybee_mta :: busybee_mta(busybee_mapper* mapper,
+busybee_mta :: busybee_mta(e::garbage_collector* gc,
+                           busybee_mapper* mapper,
                            const po6::net::location& bind_to,
                            uint64_t server_id,
                            size_t num_threads)
@@ -364,7 +365,7 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
     , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
-    , m_server2channel(10)
+    , m_server2channel(gc)
     , m_mapper(mapper)
     , m_server_id(server_id)
     , m_anon_lock()
@@ -435,14 +436,15 @@ busybee_mta :: busybee_mta(busybee_mapper* mapper,
 #endif // mta
 
 #ifdef BUSYBEE_STA
-busybee_sta :: busybee_sta(busybee_mapper* mapper,
+busybee_sta :: busybee_sta(e::garbage_collector* gc,
+                           busybee_mapper* mapper,
                            const po6::net::location& bind_to,
                            uint64_t server_id)
     : m_epoll(EPOLL_CREATE(64))
     , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
-    , m_server2channel(10)
+    , m_server2channel(gc)
     , m_mapper(mapper)
     , m_server_id(server_id)
     , m_anon_id(1)
@@ -481,12 +483,13 @@ busybee_sta :: busybee_sta(busybee_mapper* mapper,
 #endif // sta
 
 #ifdef BUSYBEE_ST
-busybee_st :: busybee_st(busybee_mapper* mapper,
+busybee_st :: busybee_st(e::garbage_collector* gc,
+                         busybee_mapper* mapper,
                          uint64_t server_id)
     : m_epoll(EPOLL_CREATE(64))
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
-    , m_server2channel(10)
+    , m_server2channel(gc)
     , m_mapper(mapper)
     , m_server_id(server_id)
     , m_anon_id(1)
@@ -669,7 +672,7 @@ CLASSNAME :: get_addr(uint64_t server_id, po6::net::location* addr)
     channel* chan = NULL;
     uint64_t chan_tag = UINT64_MAX;
 
-    if (!m_server2channel.lookup(server_id, &chan_tag))
+    if (!m_server2channel.get(server_id, &chan_tag))
     {
         return BUSYBEE_DISRUPTED;
     }
@@ -718,7 +721,7 @@ CLASSNAME :: drop(uint64_t server_id)
     channel* chan = NULL;
     uint64_t chan_tag = UINT64_MAX;
 
-    if (!m_server2channel.lookup(server_id, &chan_tag))
+    if (!m_server2channel.get(server_id, &chan_tag))
     {
         return BUSYBEE_SUCCESS;
     }
@@ -1066,7 +1069,7 @@ CLASSNAME :: up_the_semaphore()
 busybee_returncode
 CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_tag)
 {
-    if (m_server2channel.lookup(server_id, _chan_tag))
+    if (m_server2channel.get(server_id, _chan_tag))
     {
         *_chan = &m_channels[(*_chan_tag) % m_channels_sz];
         return BUSYBEE_SUCCESS;
@@ -1116,7 +1119,7 @@ CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_ta
         }
 
         (*_chan)->id = server_id;
-        m_server2channel.insert(server_id, (*_chan)->tag);
+        m_server2channel.put_ine(server_id, (*_chan)->tag);
         // at this point, the channel is fully setup
         *_chan_tag = (*_chan)->tag;
         return possibly_work_send_or_recv(*_chan);
@@ -1288,9 +1291,9 @@ CLASSNAME :: work_close(channel* chan, busybee_returncode* rc)
 
     uint64_t old_tag = UINT64_MAX;
 
-    if (m_server2channel.lookup(chan->id, &old_tag) && chan->tag == old_tag)
+    if (m_server2channel.get(chan->id, &old_tag) && chan->tag == old_tag)
     {
-        m_server2channel.remove(chan->id);
+        m_server2channel.del_if(chan->id, old_tag);
     }
 
     DEBUG << "closing " << chan->tag << std::endl;
@@ -1615,13 +1618,13 @@ CLASSNAME :: handle_identify(channel* chan,
             po6::threads::mutex::hold hold(&m_anon_lock);
 #endif // BUSYBEE_MULTITHREADED
 
-            while (m_server2channel.contains(id))
+            while (m_server2channel.has(m_anon_id))
             {
-                ++m_anon_id;
+                m_anon_id = (m_anon_id + 1) & UINT32_MAX;
             }
 
             id = m_anon_id;
-            ++m_anon_id;
+            m_anon_id = (m_anon_id + 1) & UINT32_MAX;
         }
         else if (id < (1ULL << 32))
         {
@@ -1635,7 +1638,7 @@ CLASSNAME :: handle_identify(channel* chan,
         {
             DEBUG << "IDENTIFY message specifies server_id=" << id << std::endl;
             chan->id = id;
-            m_server2channel.insert(id, chan->tag);
+            m_server2channel.put_ine(id, chan->tag);
             // XXX dedupe!
         }
         else if (chan->id != id)

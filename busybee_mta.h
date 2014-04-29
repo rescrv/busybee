@@ -40,7 +40,8 @@
 // e
 #include <e/array_ptr.h>
 #include <e/buffer.h>
-#include <e/lockfree_hash_map.h>
+#include <e/garbage_collector.h>
+#include <e/nwf_hash_map.h>
 
 // BusyBee
 #include <busybee_mapper.h>
@@ -51,7 +52,8 @@
 class busybee_mta
 {
     public:
-        busybee_mta(busybee_mapper* mapper,
+        busybee_mta(e::garbage_collector* gc,
+                    busybee_mapper* mapper,
                     const po6::net::location& bind_to,
                     uint64_t server_id,
                     size_t num_threads);
@@ -116,7 +118,11 @@ class busybee_mta
         po6::net::socket m_listen;
         size_t m_channels_sz;
         e::array_ptr<channel> m_channels;
-        e::lockfree_hash_map<uint64_t, uint64_t, e::hash_map_id> m_server2channel;
+        static uint64_t hash(const uint64_t& r)
+        {
+            return r;
+        }
+        e::nwf_hash_map<uint64_t, uint64_t, hash> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
         po6::threads::mutex m_anon_lock;

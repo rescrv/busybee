@@ -38,7 +38,8 @@
 // e
 #include <e/array_ptr.h>
 #include <e/buffer.h>
-#include <e/lockfree_hash_map.h>
+#include <e/garbage_collector.h>
+#include <e/nwf_hash_map.h>
 
 // BusyBee
 #include <busybee_mapper.h>
@@ -49,7 +50,8 @@
 class busybee_st
 {
     public:
-        busybee_st(busybee_mapper* mapper,
+        busybee_st(e::garbage_collector* gc,
+                   busybee_mapper* mapper,
                    uint64_t server_id);
         ~busybee_st() throw ();
 
@@ -101,7 +103,7 @@ class busybee_st
         {
             return r;
         }
-        e::lockfree_hash_map<uint64_t, uint64_t, hash> m_server2channel;
+        e::nwf_hash_map<uint64_t, uint64_t, hash> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;
         uint32_t m_anon_id;
