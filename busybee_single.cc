@@ -270,7 +270,6 @@ busybee_single :: recv(std::auto_ptr<e::buffer>* msg)
 void
 busybee_single :: reset()
 {
-    abort();
     try
     {
         m_connection.shutdown(SHUT_RDWR);
