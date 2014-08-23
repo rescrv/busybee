@@ -596,10 +596,15 @@ CLASSNAME :: unpause()
     m_pause_may_unpause.broadcast();
     // restore our switched-out queue
     m_recv_lock.lock();
-    *m_recv_end = m_recv_queue_setaside;
-    m_recv_end = m_recv_end_setaside;
-    m_recv_queue_setaside = NULL;
-    m_recv_end_setaside = NULL;
+
+    if (m_recv_queue_setaside)
+    {
+        *m_recv_end = m_recv_queue_setaside;
+        m_recv_end = m_recv_end_setaside;
+        m_recv_queue_setaside = NULL;
+        m_recv_end_setaside = NULL;
+    }
+
     m_recv_lock.unlock();
 }
 
