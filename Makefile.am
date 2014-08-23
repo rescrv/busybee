@@ -39,7 +39,7 @@ include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busy
 lib_LTLIBRARIES = libbusybee.la
 libbusybee_la_SOURCES = busybee_mta.cc busybee_sta.cc busybee_st.cc busybee_mapper.cc busybee_returncode.cc busybee_single.cc busybee_utils.cc
 libbusybee_la_LIBADD = $(E_LIBS)
-libbusybee_la_LDFLAGS =  -version-info 2:1:0
+libbusybee_la_LDFLAGS =  -version-info 2:2:0
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = busybee.pc
 
