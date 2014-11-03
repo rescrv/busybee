@@ -19,7 +19,7 @@ AC_LANG(C++)
 ANAL_WARNINGS
 
 # Checks for libraries.
-PKG_CHECK_MODULES([PO6], [libpo6 >= 0.5])
+PKG_CHECK_MODULES([PO6], [libpo6 >= 0.6])
 PKG_CHECK_MODULES([E], [libe >= 0.7])
 
 # Checks for header files.
