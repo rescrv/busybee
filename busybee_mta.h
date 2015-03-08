@@ -88,6 +88,9 @@ class busybee_mta
                                 std::auto_ptr<e::buffer> msg);
         busybee_returncode recv(uint64_t* server_id,
                                 std::auto_ptr<e::buffer>* msg);
+        // like "recv", but never returns a message (therefore, never returns
+        // SUCCESS)---you can assert it.
+        busybee_returncode recv_no_msg(uint64_t* server_id);
 
     private:
         class channel;

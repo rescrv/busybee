@@ -796,12 +796,17 @@ CLASSNAME :: send(uint64_t server_id,
 }
 
 busybee_returncode
+CLASSNAME :: recv_no_msg(uint64_t* id)
+{
+    return recv(id, NULL);
+}
+
+busybee_returncode
 CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 {
 #ifdef BUSYBEE_MULTITHREADED
     bool need_to_pause = false;
 #endif // BUSYBEE_MULTITHREADED
-    //DEBUG << "recv(" << id << ", " << msg << ")" << std::endl;
     *id = 0;
 
     while (true)
@@ -845,7 +850,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 
         // this is a racy read; we assume that some thread will see the latest
         // value (likely the one that last changed it).
-        if (m_recv_queue)
+        if (msg && m_recv_queue)
         {
 #ifdef BUSYBEE_MULTITHREADED
             m_recv_lock.lock();
@@ -959,7 +964,12 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         if (!work_dispatch(chan, events, &rc))
         {
             *id = _id;
-            msg->reset();
+
+            if (msg)
+            {
+                msg->reset();
+            }
+
             return rc;
         }
     }
