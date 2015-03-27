@@ -137,7 +137,6 @@ class busybee_mta
         recv_message* m_recv_queue_setaside;
         recv_message** m_recv_end_setaside;
         sigset_t m_sigmask;
-        char* m_pipebuf;
         po6::io::fd m_eventfdread;
         po6::io::fd m_eventfdwrite;
         po6::threads::mutex m_pause_lock;

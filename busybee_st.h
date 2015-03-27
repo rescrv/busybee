@@ -74,7 +74,8 @@ class busybee_st
         busybee_returncode recv(uint64_t* server_id,
                                 std::auto_ptr<e::buffer>* msg);
         // like "recv", but never returns a message (therefore, never returns
-        // SUCCESS)---you can assert it.
+        // SUCCESS)---you can assert it.  This will *not* clear an event on
+        // poll_fd.
         busybee_returncode recv_no_msg(uint64_t* server_id);
 
     private:
@@ -114,6 +115,9 @@ class busybee_st
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
         sigset_t m_sigmask;
+        po6::io::fd m_eventfdread;
+        po6::io::fd m_eventfdwrite;
+        bool m_event_in_fd;
 
     private:
         busybee_st(const busybee_st&);

@@ -29,12 +29,6 @@
 # include "config.h"
 #endif
 
-#ifdef BUSYBEE_DEBUG
-#define DEBUG std::cerr << __FILE__ << ":" << __LINE__ << " " << this << " "
-#else
-#define DEBUG if (0) std::cerr << __FILE__ << ":" << __LINE__ << " " << this << " "
-#endif
-
 #ifndef __STDC_LIMIT_MACROS
 #define __STDC_LIMIT_MACROS
 #endif
@@ -80,26 +74,6 @@
 #endif
 #ifdef BUSYBEE_SINGLETHREADED
 #undef BUSYBEE_SINGLETHREADED
-#endif
-#ifndef BUSYBEE_ACCEPT
-#define BUSYBEE_ACCEPT
-#endif
-#ifdef BUSYBEE_NOACCEPT
-#undef BUSYBEE_NOACCEPT
-#endif
-#endif
-
-#ifdef BUSYBEE_STA
-#ifdef BUSYBEE_TYPE
-#error BUSYBEE_TYPE defined already
-#endif
-#define BUSYBEE_TYPE sta
-#include "busybee_sta.h"
-#ifndef BUSYBEE_SINGLETHREADED
-#define BUSYBEE_SINGLETHREADED
-#endif
-#ifdef BUSYBEE_MULTITHREADED
-#undef BUSYBEE_MULTITHREADED
 #endif
 #ifndef BUSYBEE_ACCEPT
 #define BUSYBEE_ACCEPT
@@ -377,7 +351,6 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
     , m_recv_queue_setaside(NULL)
     , m_recv_end_setaside(NULL)
     , m_sigmask()
-    , m_pipebuf(new char[num_threads])
     , m_eventfdread()
     , m_eventfdwrite()
     , m_pause_lock()
@@ -410,58 +383,11 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
     m_eventfdread = eventfd[0];
     m_eventfdwrite = eventfd[1];
 
-    m_listen.set_reuseaddr();
-    m_listen.bind(bind_to);
-    m_listen.listen(m_channels_sz);
-    m_listen.set_nonblocking();
-
-    if (add_event(m_listen.get(), EPOLLIN) < 0)
-    {
-        throw po6::error(errno);
-    }
-
     if (add_event(m_eventfdread.get(),EPOLLIN) < 0)
     {
         throw po6::error(errno);
     }
 
-    for (size_t i = 0; i < m_channels_sz; ++i)
-    {
-        m_channels[i].tag = m_channels_sz + i;
-    }
-
-    sigemptyset(&m_sigmask);
-    DEBUG << "initialized busybee_mta instance at " << this << std::endl;
-}
-#endif // mta
-
-#ifdef BUSYBEE_STA
-busybee_sta :: busybee_sta(e::garbage_collector* gc,
-                           busybee_mapper* mapper,
-                           const po6::net::location& bind_to,
-                           uint64_t server_id)
-    : m_epoll(EPOLL_CREATE(64))
-    , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
-    , m_channels_sz(sysconf(_SC_OPEN_MAX))
-    , m_channels(new channel[m_channels_sz])
-    , m_server2channel(gc)
-    , m_mapper(mapper)
-    , m_server_id(server_id)
-    , m_anon_id(1)
-    , m_timeout(-1)
-    , m_recv_queue(NULL)
-    , m_recv_end(&m_recv_queue)
-    , m_sigmask()
-{
-    assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
-
-    if (m_epoll.get() < 0)
-    {
-        throw po6::error(errno);
-    }
-
-    add_signals();
-
     m_listen.set_reuseaddr();
     m_listen.bind(bind_to);
     m_listen.listen(m_channels_sz);
@@ -478,9 +404,8 @@ busybee_sta :: busybee_sta(e::garbage_collector* gc,
     }
 
     sigemptyset(&m_sigmask);
-    DEBUG << "initialized busybee_sta instance at " << this << std::endl;
 }
-#endif // sta
+#endif // mta
 
 #ifdef BUSYBEE_ST
 busybee_st :: busybee_st(e::garbage_collector* gc,
@@ -497,6 +422,9 @@ busybee_st :: busybee_st(e::garbage_collector* gc,
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
     , m_sigmask()
+    , m_eventfdread()
+    , m_eventfdwrite()
+    , m_event_in_fd(false)
 {
     assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
 
@@ -507,13 +435,27 @@ busybee_st :: busybee_st(e::garbage_collector* gc,
 
     add_signals();
 
+    int eventfd[2];
+
+    if (pipe(eventfd) < 0)
+    {
+        throw po6::error(errno);
+    }
+
+    m_eventfdread = eventfd[0];
+    m_eventfdwrite = eventfd[1];
+
+    if (add_event(m_eventfdread.get(),EPOLLIN) < 0)
+    {
+        throw po6::error(errno);
+    }
+
     for (size_t i = 0; i < m_channels_sz; ++i)
     {
         m_channels[i].tag = m_channels_sz + i;
     }
 
     sigemptyset(&m_sigmask);
-    DEBUG << "initialized busybee_st instance at " << this << std::endl;
 }
 #endif // st
 
@@ -556,7 +498,6 @@ void
 CLASSNAME :: shutdown()
 {
     po6::threads::mutex::hold hold(&m_pause_lock);
-    DEBUG << "shutdown called" << std::endl;
     m_shutdown = true;
     up_the_semaphore();
 }
@@ -565,9 +506,7 @@ void
 CLASSNAME :: pause()
 {
     po6::threads::mutex::hold hold(&m_pause_lock);
-    assert(e::atomic::load_32_nobarrier(&m_pause_paused) == 0);
     e::atomic::store_32_nobarrier(&m_pause_paused, 1);
-    DEBUG << "pause called" << std::endl;
     up_the_semaphore();
 
     // switch out the queue of messages so that threads pause quicker
@@ -580,18 +519,14 @@ CLASSNAME :: pause()
 
     while (m_pause_num < m_pause_count)
     {
-        DEBUG << "paused " << m_pause_num << "/" << m_pause_count << std::endl;
         m_pause_all_paused.wait();
     }
-
-    DEBUG << "all threads paused" << std::endl;
 }
 
 void
 CLASSNAME :: unpause()
 {
     po6::threads::mutex::hold hold(&m_pause_lock);
-    DEBUG << "unpause called" << std::endl;
     e::atomic::store_32_nobarrier(&m_pause_paused, 0);
     m_pause_may_unpause.broadcast();
     // restore our switched-out queue
@@ -611,16 +546,15 @@ CLASSNAME :: unpause()
 void
 CLASSNAME :: wake_one()
 {
-    uint64_t num = 1;
-    ssize_t ret = m_eventfdwrite.write(&m_pipebuf, num);
-    assert(ret == 1); // XXX
+    char c;
+    ssize_t ret = m_eventfdwrite.xwrite(&c, 1);
+    assert(ret == 1); // should always succeed
 }
 #endif // BUSYBEE_MULTITHREADED
 
 void
 CLASSNAME :: set_id(uint64_t server_id)
 {
-    DEBUG << "changing id from " << m_server_id << " to " << server_id << std::endl;
     m_server_id = server_id;
 }
 
@@ -651,7 +585,6 @@ busybee_st :: set_external_fd(int fd)
 
     if (chan->state == channel::EXTERNAL)
     {
-        DEBUG << "fd=" << fd << " already in EXTERNAL state" << std::endl;
         chan->unlock();
         return BUSYBEE_SUCCESS;
     }
@@ -660,11 +593,9 @@ busybee_st :: set_external_fd(int fd)
 
     if (add_event(fd, EPOLLIN) < 0 && errno != EEXIST)
     {
-        DEBUG << "failed to add file descriptor to epoll" << std::endl;
         return BUSYBEE_POLLFAILED;
     }
 
-    DEBUG << "setting fd=" << fd << " to EXTERNAL state" << std::endl;
     chan->state = channel::EXTERNAL;
     chan->unlock();
     return BUSYBEE_SUCCESS;
@@ -703,7 +634,6 @@ CLASSNAME :: get_addr(uint64_t server_id, po6::net::location* addr)
 bool
 CLASSNAME :: deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg)
 {
-    DEBUG << "deliver(" << server_id << ", 0x" << msg->hex() << ")" << std::endl;
     recv_message* m(new recv_message(NULL, server_id, msg));
 #ifdef BUSYBEE_MULTITHREADED
     po6::threads::mutex::hold hold(&m_recv_lock);
@@ -747,7 +677,6 @@ CLASSNAME :: send(uint64_t server_id,
     assert(msg->size() >= BUSYBEE_HEADER_SIZE);
     assert(msg->size() <= BUSYBEE_MAX_MSG_SIZE);
     *msg << static_cast<uint32_t>(msg->size());
-    DEBUG << "send(" << server_id << ", " << msg->hex() << ")" << std::endl;
     std::auto_ptr<send_message> sm(new send_message(NULL, msg));
 
     while (true)
@@ -758,7 +687,6 @@ CLASSNAME :: send(uint64_t server_id,
 
         if (rc != BUSYBEE_SUCCESS)
         {
-            DEBUG << "_get_channel failed: " << rc << std::endl;
             return rc;
         }
 
@@ -846,6 +774,8 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         {
             return BUSYBEE_SHUTDOWN;
         }
+
+        need_to_pause = false;
 #endif // BUSYBEE_MULTITHREADED
 
         // this is a racy read; we assume that some thread will see the latest
@@ -872,6 +802,14 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
             {
                 m_recv_queue = NULL;
                 m_recv_end = &m_recv_queue;
+#ifdef BUSYBEE_SINGLETHREADED
+                char buf[32];
+
+                while (m_eventfdread.xread(buf, 32) == 32)
+                    ;
+
+                m_event_in_fd = false;
+#endif // BUSYBEE_SINGLETHREADED
             }
 
 #ifdef BUSYBEE_MULTITHREADED
@@ -936,12 +874,10 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         }
 #endif // BUSYBEE_ACCEPT
 
-        DEBUG << "processing fd=" << fd << " events=" << events << std::endl;
         channel* chan = &m_channels[fd];
 
         // acquire relevant read/write locks
         chan->lock();
-        DEBUG << "channel in state=" << static_cast<unsigned>(chan->state) << std::endl;
 
         if (chan->state == channel::EXTERNAL)
         {
@@ -1014,7 +950,6 @@ CLASSNAME :: add_event(int fd, uint32_t events)
 int
 CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
-    //DEBUG << "epoll_pwait" << std::endl;
     epoll_event ee;
     int ret = epoll_pwait(m_epoll.get(), &ee, 1, m_timeout, &m_sigmask);
     *fd = ee.data.fd;
@@ -1027,7 +962,6 @@ CLASSNAME :: wait_event(int* fd, uint32_t* events)
 int
 CLASSNAME :: wait_event(int* fd, uint32_t* events)
 {
-    DEBUG << "kevent" << std::endl;
     struct kevent ee;
     struct timespec to = {0,0}; 
     int ret;
@@ -1076,8 +1010,14 @@ CLASSNAME :: wait_event(int* fd, uint32_t* events)
 void
 CLASSNAME :: up_the_semaphore()
 {
-    ssize_t ret = m_eventfdwrite.write(&m_pipebuf, m_pause_count);
-    assert(ret == static_cast<ssize_t>(m_pause_count));
+    char buf[32];
+
+    for (size_t i = 0; i < m_pause_count; i += 32)
+    {
+        size_t x = std::min(m_pause_count - i, size_t(32));
+        ssize_t ret = m_eventfdwrite.xwrite(buf, x);
+        assert(ret == static_cast<ssize_t>(x)); // should always succeed
+    }
 }
 #endif // BUSYBEE_MULTITHREADED
 
@@ -1154,7 +1094,6 @@ CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_ta
 busybee_returncode
 CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
 {
-    DEBUG << "setting up a new channel" << std::endl;
     chan->soc.swap(soc);
 #ifdef HAVE_SO_NOSIGPIPE
     int sigpipeopt = 1;
@@ -1166,7 +1105,6 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
 
     if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
     {
-        DEBUG << "failed to add file descriptor to epoll" << std::endl;
         return BUSYBEE_POLLFAILED;
     }
 
@@ -1192,7 +1130,6 @@ CLASSNAME :: possibly_work_send_or_recv(channel* chan)
 
     if (poll(&pfd, 1, 0) > 0)
     {
-        DEBUG << "there's already activity, acting on it now" << std::endl;
         uint32_t events = 0;
         if ((pfd.revents & POLLIN)) events |= EPOLLIN;
         if ((pfd.revents & POLLOUT)) events |= EPOLLOUT;
@@ -1260,7 +1197,6 @@ CLASSNAME :: work_accept()
 
         if (soc.get() < 0)
         {
-            DEBUG << "looks like a false accept" << std::endl;
             return;
         }
 
@@ -1275,7 +1211,6 @@ CLASSNAME :: work_accept()
             chan->reset(m_channels_sz);
             chan->unlock();
             cleanup_needed = false;
-            DEBUG << "could not setup channel for accept" << std::endl;
             return;
         }
 
@@ -1299,7 +1234,6 @@ CLASSNAME :: work_close(channel* chan, busybee_returncode* rc)
 {
     if (chan->sender_has_it || chan->recver_has_it)
     {
-        DEBUG << "work_close becomes a NOP as someone else is writing" << std::endl;
         chan->unlock();
         return true;
     }
@@ -1311,7 +1245,6 @@ CLASSNAME :: work_close(channel* chan, busybee_returncode* rc)
         m_server2channel.del_if(chan->id, old_tag);
     }
 
-    DEBUG << "closing " << chan->tag << std::endl;
     chan->reset(m_channels_sz);
     chan->unlock();
     *rc = BUSYBEE_DISRUPTED;
@@ -1453,7 +1386,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
         // restore leftovers
         if (chan->recv_partial_header_sz)
         {
-            DEBUG << "copy " << chan->recv_partial_header_sz << " bytes from last loop" << std::endl;
             memmove(buf, chan->recv_partial_header, chan->recv_partial_header_sz);
         }
 
@@ -1461,7 +1393,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
         uint8_t* tmp_buf = buf + chan->recv_partial_header_sz;
         size_t tmp_buf_sz = IO_BLOCKSIZE - chan->recv_partial_header_sz;
         ssize_t rem = chan->soc.recv(tmp_buf, tmp_buf_sz, SENDRECV_FLAGS);
-        DEBUG << "recv'd " << rem << " bytes" << std::endl;
 
         if (rem < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
         {
@@ -1490,12 +1421,20 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
 
             if (recv_queue)
             {
-                DEBUG << "copying received messages to global queue" << std::endl;
 #ifdef BUSYBEE_MULTITHREADED
                 po6::threads::mutex::hold hold(&m_recv_lock);
 #endif // BUSYBEE_MULTITHREADED
                 *m_recv_end = recv_queue;
                 m_recv_end = recv_end;
+
+#ifdef BUSYBEE_SINGLETHREADED
+                if (!m_event_in_fd)
+                {
+                    char c;
+                    m_eventfdwrite.xwrite(&c, 1);
+                    m_event_in_fd = true;
+                }
+#endif // BUSYBEE_SINGLETHREADED
             }
 
             return true;
@@ -1507,7 +1446,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
             return work_close(chan, rc);
         }
 
-        DEBUG << "recv'd " << rem << " bytes, so chunking that into messages" << std::endl;
         // We know rem is >= 0, so add the amount of preexisting data.
         rem += chan->recv_partial_header_sz;
         chan->recv_partial_header_sz = 0;
@@ -1515,22 +1453,16 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
 
         while (rem > 0)
         {
-            DEBUG << "still need to process " << rem << " bytes" << std::endl;
-
             if (!chan->recv_partial_msg.get())
             {
-                DEBUG << "no message in progress" << std::endl;
-
                 if (rem < static_cast<ssize_t>((sizeof(uint32_t))))
                 {
-                    DEBUG << "not enough to make a header" << std::endl;
                     memmove(chan->recv_partial_header, data, rem);
                     chan->recv_partial_header_sz = rem;
                     rem = 0;
                 }
                 else
                 {
-                    DEBUG << "created header" << std::endl;
                     uint32_t sz;
                     e::unpack32be(data, &sz);
                     chan->recv_flags = BBMSG_FLAGS & sz;
@@ -1555,7 +1487,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
             {
                 uint32_t sz = chan->recv_partial_msg->capacity() - chan->recv_partial_msg->size();
                 sz = std::min(static_cast<uint32_t>(rem), sz);
-                DEBUG << "filling in message with " << sz << " bytes" << std::endl;
                 rem -= sz;
                 memmove(chan->recv_partial_msg->data() + chan->recv_partial_msg->size(), data, sz);
                 chan->recv_partial_msg->resize(chan->recv_partial_msg->size() + sz);
@@ -1572,7 +1503,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
                     }
                     else
                     {
-                        DEBUG << "received new message " << chan->recv_partial_msg->hex() << std::endl;
                         recv_message* tmp = new recv_message(NULL, chan->id, chan->recv_partial_msg);
                         *recv_end = tmp;
                         recv_end = &tmp->next;
@@ -1585,8 +1515,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
                 }
             }
         }
-
-        DEBUG << "emptied I/O buffer; trying again" << std::endl;
     }
 }
 
@@ -1614,11 +1542,8 @@ CLASSNAME :: handle_identify(channel* chan,
 {
     if (chan->state == channel::CONNECTED)
     {
-        DEBUG << "IDENTIFY message received" << std::endl;
-
         if (chan->recv_partial_msg->size() != (sizeof(uint32_t) + sizeof(uint64_t)))
         {
-            DEBUG << "IDENTIFY message not sized correctly: " << chan->recv_partial_msg->hex() << std::endl;
             *need_close = true;
             *clean_close = false;
             return;
@@ -1643,7 +1568,6 @@ CLASSNAME :: handle_identify(channel* chan,
         }
         else if (id < (1ULL << 32))
         {
-            DEBUG << "IDENTIFY message specifies server_id=" << id << ", which is less than 1<<32" << std::endl;
             *need_close = true;
             *clean_close = false;
             return;
@@ -1651,25 +1575,21 @@ CLASSNAME :: handle_identify(channel* chan,
 
         if (chan->id == 0)
         {
-            DEBUG << "IDENTIFY message specifies server_id=" << id << std::endl;
             chan->id = id;
             m_server2channel.put_ine(id, chan->tag);
             // XXX dedupe!
         }
         else if (chan->id != id)
         {
-            DEBUG << "IDENTIFY message specifies server_id=" << id << ", but channel set to " << chan->id << std::endl;
             *need_close = true;
             *clean_close = false;
             return;
         }
 
-        DEBUG << "IDENTIFY success" << std::endl;
         chan->state = channel::IDENTIFIED;
     }
     else
     {
-        DEBUG << "IDENTIFY message received when already identified or not connected" << std::endl;
         *need_close = true;
         *clean_close = false;
         return;
