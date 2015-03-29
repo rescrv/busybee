@@ -86,11 +86,13 @@ class busybee_mta
         busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
-        busybee_returncode recv(uint64_t* server_id,
+        busybee_returncode recv(e::garbage_collector::thread_state* ts,
+                                uint64_t* server_id,
                                 std::auto_ptr<e::buffer>* msg);
         // like "recv", but never returns a message (therefore, never returns
         // SUCCESS)---you can assert it.
-        busybee_returncode recv_no_msg(uint64_t* server_id);
+        busybee_returncode recv_no_msg(e::garbage_collector::thread_state* ts,
+                                       uint64_t* server_id);
 
     private:
         class channel;
@@ -125,6 +127,7 @@ class busybee_mta
         {
             return r;
         }
+        e::garbage_collector* m_gc;
         e::nwf_hash_map<uint64_t, uint64_t, hash> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;

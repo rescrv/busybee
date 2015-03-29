@@ -339,6 +339,7 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
     , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
+    , m_gc(gc)
     , m_server2channel(gc)
     , m_mapper(mapper)
     , m_server_id(server_id)
@@ -736,13 +737,25 @@ CLASSNAME :: send(uint64_t server_id,
 }
 
 busybee_returncode
-CLASSNAME :: recv_no_msg(uint64_t* id)
+CLASSNAME :: recv_no_msg(
+#ifdef BUSYBEE_MULTITHREADED
+                  e::garbage_collector::thread_state* ts,
+#endif // BUSYBEE_MULTITHREADED
+                         uint64_t* id)
 {
+#ifdef BUSYBEE_MULTITHREADED
+    return recv(ts, id, NULL);
+#else //
     return recv(id, NULL);
+#endif // BUSYBEE_MULTITHREADED
 }
 
 busybee_returncode
-CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
+CLASSNAME :: recv(
+#ifdef BUSYBEE_MULTITHREADED
+                  e::garbage_collector::thread_state* ts,
+#endif // BUSYBEE_MULTITHREADED
+                  uint64_t* id, std::auto_ptr<e::buffer>* msg)
 {
 #ifdef BUSYBEE_SINGLETHREADED
     m_gc.quiescent_state(&m_gc_ts);
@@ -844,7 +857,15 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
         int fd;
         uint32_t events;
 
-        if ((status = wait_event(&fd, &events)) <= 0)
+#ifdef BUSYBEE_MULTITHREADED
+        m_gc->offline(ts);
+#endif // BUSYBEE_MULTITHREADED
+        status = wait_event(&fd, &events);
+#ifdef BUSYBEE_MULTITHREADED
+        m_gc->online(ts);
+#endif // BUSYBEE_MULTITHREADED
+
+        if (status <= 0)
         {
             if (status < 0 &&
                 errno != EAGAIN &&
