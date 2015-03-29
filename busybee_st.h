@@ -50,8 +50,7 @@
 class busybee_st
 {
     public:
-        busybee_st(e::garbage_collector* gc,
-                   busybee_mapper* mapper,
+        busybee_st(busybee_mapper* mapper,
                    uint64_t server_id);
         ~busybee_st() throw ();
 
@@ -107,6 +106,8 @@ class busybee_st
         {
             return r;
         }
+        e::garbage_collector m_gc;
+        e::garbage_collector::thread_state m_gc_ts;
         e::nwf_hash_map<uint64_t, uint64_t, hash> m_server2channel;
         busybee_mapper* m_mapper;
         uint64_t m_server_id;

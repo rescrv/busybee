@@ -408,13 +408,14 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
 #endif // mta
 
 #ifdef BUSYBEE_ST
-busybee_st :: busybee_st(e::garbage_collector* gc,
-                         busybee_mapper* mapper,
+busybee_st :: busybee_st(busybee_mapper* mapper,
                          uint64_t server_id)
     : m_epoll(EPOLL_CREATE(64))
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
-    , m_server2channel(gc)
+    , m_gc()
+    , m_gc_ts()
+    , m_server2channel(&m_gc)
     , m_mapper(mapper)
     , m_server_id(server_id)
     , m_anon_id(1)
@@ -427,6 +428,7 @@ busybee_st :: busybee_st(e::garbage_collector* gc,
     , m_event_in_fd(false)
 {
     assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
+    m_gc.register_thread(&m_gc_ts);
 
     if (m_epoll.get() < 0)
     {
@@ -472,6 +474,10 @@ CLASSNAME :: ~CLASSNAME() throw ()
         m_recv_queue = m_recv_queue->next;
         delete m;
     }
+
+#ifdef BUSYBEE_SINGLETHREADED
+    m_gc.register_thread(&m_gc_ts);
+#endif // BUSYBEE_SINGLETHREADED
 }
 
 void
@@ -653,6 +659,9 @@ CLASSNAME :: poll_fd()
 busybee_returncode
 CLASSNAME :: drop(uint64_t server_id)
 {
+#ifdef BUSYBEE_SINGLETHREADED
+    m_gc.quiescent_state(&m_gc_ts);
+#endif // BUSYBEE_SINGLETHREADED
     channel* chan = NULL;
     uint64_t chan_tag = UINT64_MAX;
 
@@ -674,6 +683,9 @@ busybee_returncode
 CLASSNAME :: send(uint64_t server_id,
                   std::auto_ptr<e::buffer> msg)
 {
+#ifdef BUSYBEE_SINGLETHREADED
+    m_gc.quiescent_state(&m_gc_ts);
+#endif // BUSYBEE_SINGLETHREADED
     assert(msg->size() >= BUSYBEE_HEADER_SIZE);
     assert(msg->size() <= BUSYBEE_MAX_MSG_SIZE);
     *msg << static_cast<uint32_t>(msg->size());
@@ -732,6 +744,9 @@ CLASSNAME :: recv_no_msg(uint64_t* id)
 busybee_returncode
 CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 {
+#ifdef BUSYBEE_SINGLETHREADED
+    m_gc.quiescent_state(&m_gc_ts);
+#endif // BUSYBEE_SINGLETHREADED
 #ifdef BUSYBEE_MULTITHREADED
     bool need_to_pause = false;
 #endif // BUSYBEE_MULTITHREADED
@@ -811,6 +826,10 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
                 m_event_in_fd = false;
 #endif // BUSYBEE_SINGLETHREADED
             }
+
+#ifdef BUSYBEE_SINGLETHREADED
+            m_gc.quiescent_state(&m_gc_ts);
+#endif // BUSYBEE_SINGLETHREADED
 
 #ifdef BUSYBEE_MULTITHREADED
             m_recv_lock.unlock();
