@@ -805,7 +805,7 @@ CLASSNAME :: recv(uint64_t* id, std::auto_ptr<e::buffer>* msg)
 #ifdef BUSYBEE_SINGLETHREADED
                 char buf[32];
 
-                while (m_eventfdread.xread(buf, 32) == 32)
+                while (m_eventfdread.read(buf, 32) == 32)
                     ;
 
                 m_event_in_fd = false;
