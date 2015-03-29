@@ -477,7 +477,7 @@ CLASSNAME :: ~CLASSNAME() throw ()
     }
 
 #ifdef BUSYBEE_SINGLETHREADED
-    m_gc.register_thread(&m_gc_ts);
+    m_gc.deregister_thread(&m_gc_ts);
 #endif // BUSYBEE_SINGLETHREADED
 }
 
