@@ -38,6 +38,7 @@
 // e
 #include <e/array_ptr.h>
 #include <e/buffer.h>
+#include <e/flagfd.h>
 #include <e/garbage_collector.h>
 #include <e/nwf_hash_map.h>
 
@@ -116,9 +117,7 @@ class busybee_st
         recv_message* m_recv_queue;
         recv_message** m_recv_end;
         sigset_t m_sigmask;
-        po6::io::fd m_eventfdread;
-        po6::io::fd m_eventfdwrite;
-        bool m_event_in_fd;
+        e::flagfd m_flagfd;
 
     private:
         busybee_st(const busybee_st&);

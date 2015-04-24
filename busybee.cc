@@ -424,9 +424,7 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
     , m_recv_queue(NULL)
     , m_recv_end(&m_recv_queue)
     , m_sigmask()
-    , m_eventfdread()
-    , m_eventfdwrite()
-    , m_event_in_fd(false)
+    , m_flagfd()
 {
     assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
     m_gc.register_thread(&m_gc_ts);
@@ -438,17 +436,12 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
 
     add_signals();
 
-    int eventfd[2];
-
-    if (pipe(eventfd) < 0)
+    if (!m_flagfd.valid())
     {
-        throw po6::error(errno);
+        throw po6::error(m_flagfd.error());
     }
 
-    m_eventfdread = eventfd[0];
-    m_eventfdwrite = eventfd[1];
-
-    if (add_event(m_eventfdread.get(),EPOLLIN) < 0)
+    if (add_event(m_flagfd.poll_fd(), EPOLLIN) < 0)
     {
         throw po6::error(errno);
     }
@@ -831,12 +824,7 @@ CLASSNAME :: recv(
                 m_recv_queue = NULL;
                 m_recv_end = &m_recv_queue;
 #ifdef BUSYBEE_SINGLETHREADED
-                char buf[32];
-
-                while (m_eventfdread.read(buf, 32) == 32)
-                    ;
-
-                m_event_in_fd = false;
+                m_flagfd.unset();
 #endif // BUSYBEE_SINGLETHREADED
             }
 
@@ -1468,12 +1456,7 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
                 m_recv_end = recv_end;
 
 #ifdef BUSYBEE_SINGLETHREADED
-                if (!m_event_in_fd)
-                {
-                    char c;
-                    m_eventfdwrite.xwrite(&c, 1);
-                    m_event_in_fd = true;
-                }
+                m_flagfd.set();
 #endif // BUSYBEE_SINGLETHREADED
             }
 
