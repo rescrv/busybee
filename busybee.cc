@@ -824,7 +824,7 @@ CLASSNAME :: recv(
                 m_recv_queue = NULL;
                 m_recv_end = &m_recv_queue;
 #ifdef BUSYBEE_SINGLETHREADED
-                m_flagfd.unset();
+                m_flagfd.clear();
 #endif // BUSYBEE_SINGLETHREADED
             }
 
