@@ -32,3 +32,6 @@
 /Makefile.in
 /missing
 /stamp-h1
+# binaries
+busybee-c-test
+

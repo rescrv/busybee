@@ -35,9 +35,9 @@ AM_MAKEFLAGS = --no-print-directory
 EXTRA_DIST = LICENSE busybee.cc
 
 noinst_PROGRAMS =
-include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busybee_utils.h busybee_mta.h busybee_sta.h busybee_st.h busybee_single.h
+include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busybee_utils.h busybee_mta.h busybee_sta.h busybee_st.h busybee_single.h busybee_mapper_c.h busybee_mta_c.h
 lib_LTLIBRARIES = libbusybee.la
-libbusybee_la_SOURCES = busybee_mta.cc busybee_sta.cc busybee_st.cc busybee_mapper.cc busybee_returncode.cc busybee_single.cc busybee_utils.cc
+libbusybee_la_SOURCES = busybee_mta.cc busybee_sta.cc busybee_st.cc busybee_mapper.cc busybee_returncode.cc busybee_single.cc busybee_utils.cc busybee_mapper_c.cc busybee_mta_c.cc
 libbusybee_la_LIBADD = $(E_LIBS)
 libbusybee_la_LDFLAGS =  -version-info 2:0:0
 pkgconfigdir = $(libdir)/pkgconfig
@@ -55,3 +55,8 @@ busybee_bench_st_SOURCES = busybee-bench-st.cc
 busybee_bench_st_LDFLAGS = -no-install
 busybee_bench_st_LDADD = libbusybee.la
 endif
+
+noinst_PROGRAMS += busybee-c-test
+busybee_c_test_SOURCES = busybee_c_test.c
+busybee_c_test_LDFLAGS = -no-install
+busybee_c_test_LDADD = libbusybee.la

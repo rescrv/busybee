@@ -28,8 +28,12 @@
 #ifndef busybee_returncode_h_
 #define busybee_returncode_h_
 
+#ifdef __cplusplus
 // C++
 #include <iostream>
+
+extern "C" {
+#endif
 
 // busybee_returncode occupies [4608, 4864)
 enum busybee_returncode
@@ -44,7 +48,10 @@ enum busybee_returncode
     BUSYBEE_INTERRUPTED = 4615
 };
 
+#ifdef __cplusplus
+}
 std::ostream&
 operator << (std::ostream& lhs, busybee_returncode rhs);
+#endif
 
 #endif // busybee_returncode_h_
