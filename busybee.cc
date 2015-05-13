@@ -682,7 +682,7 @@ CLASSNAME :: send(uint64_t server_id,
 #endif // BUSYBEE_SINGLETHREADED
     assert(msg->size() >= BUSYBEE_HEADER_SIZE);
     assert(msg->size() <= BUSYBEE_MAX_MSG_SIZE);
-    *msg << static_cast<uint32_t>(msg->size());
+    msg->pack() << static_cast<uint32_t>(msg->size());
     std::auto_ptr<send_message> sm(new send_message(NULL, msg));
 
     while (true)
@@ -1139,7 +1139,7 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
     std::auto_ptr<e::buffer> msg;
     msg.reset(e::buffer::create(sizeof(uint32_t) + sizeof(uint64_t)));
     uint32_t sz = (sizeof(uint32_t) + sizeof(uint64_t)) | BBMSG_IDENTIFY;
-    *msg << sz << m_server_id;
+    msg->pack() << sz << m_server_id;
     std::auto_ptr<send_message> sm(new send_message(NULL, msg));
 
     *chan->send_end = sm.get();

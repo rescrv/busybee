@@ -31,6 +31,9 @@
 #define DEBUG if (0) std::cerr << __FILE__ << ":" << __LINE__ << " "
 #endif
 
+// C
+#include <assert.h>
+
 // POSIX
 #ifndef _MSC_VER
 #include <poll.h>
@@ -89,7 +92,7 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
 #endif
 {
     // Pack the size into the header
-    *msg << static_cast<uint32_t>(msg->size());
+    msg->pack() << static_cast<uint32_t>(msg->size());
 
     if (m_connection.get() < 0)
     {
@@ -126,7 +129,7 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
         }
     }
 
-    if (m_connection.xwrite(msg->data(), msg->size()) != msg->size())
+    if (m_connection.xwrite(msg->data(), msg->size()) != ssize_t(msg->size()))
     {
         reset();
         return BUSYBEE_DISRUPTED;
