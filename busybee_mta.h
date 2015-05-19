@@ -82,7 +82,6 @@ class busybee_mta
     public:
         busybee_returncode get_addr(uint64_t server_id, po6::net::location* addr);
         bool deliver(uint64_t server_id, std::auto_ptr<e::buffer> msg);
-        int poll_fd();
         busybee_returncode drop(uint64_t server_id);
         busybee_returncode send(uint64_t server_id,
                                 std::auto_ptr<e::buffer> msg);
