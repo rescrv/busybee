@@ -19,8 +19,8 @@ AC_LANG(C++)
 ANAL_WARNINGS
 
 # Checks for libraries.
-PKG_CHECK_MODULES([PO6], [libpo6 >= 0.6])
-PKG_CHECK_MODULES([E], [libe >= 0.7])
+PKG_CHECK_MODULES([PO6], [libpo6 >= 0.7])
+PKG_CHECK_MODULES([E], [libe >= 0.10])
 
 # Checks for header files.
 AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h sys/socket.h unistd.h])
