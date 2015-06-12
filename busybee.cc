@@ -781,7 +781,13 @@ CLASSNAME :: recv(
                 }
 
                 did_we_pause = true;
+#ifdef BUSYBEE_MULTITHREADED
+                m_gc->offline(ts);
+#endif // BUSYBEE_MULTITHREADED
                 m_pause_may_unpause.wait();
+#ifdef BUSYBEE_MULTITHREADED
+                m_gc->online(ts);
+#endif // BUSYBEE_MULTITHREADED
                 --m_pause_num;
             }
 
