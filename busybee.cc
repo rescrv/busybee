@@ -734,7 +734,7 @@ CLASSNAME :: send(uint64_t server_id,
 busybee_returncode
 CLASSNAME :: recv_no_msg(
 #ifdef BUSYBEE_MULTITHREADED
-                  e::garbage_collector::thread_state* ts,
+                         e::garbage_collector::thread_state* ts,
 #endif // BUSYBEE_MULTITHREADED
                          uint64_t* id)
 {
@@ -946,6 +946,38 @@ CLASSNAME :: recv(
         }
     }
 }
+
+#ifdef BUSYBEE_SINGLETHREADED
+void
+CLASSNAME :: reset()
+{
+    typedef e::nwf_hash_map<uint64_t, uint64_t, hash> chanmap_t;
+    m_channels = new channel[m_channels_sz];
+
+    for (chanmap_t::iterator it = m_server2channel.begin();
+            it != m_server2channel.end(); ++it)
+    {
+        m_server2channel.del(it->first);
+    }
+
+    for (size_t i = 0; i < m_channels_sz; ++i)
+    {
+        m_channels[i].tag = m_channels_sz + i;
+    }
+
+    m_timeout = -1;
+    sigemptyset(&m_sigmask);
+
+    while (m_recv_queue)
+    {
+        recv_message* tmp = m_recv_queue;
+        m_recv_queue = m_recv_queue->next;
+        delete tmp;
+    }
+
+    m_recv_end = &m_recv_queue;
+}
+#endif // BUSYBEE_SINGLETHREADED
 
 #ifdef HAVE_EPOLL_CTL
 int

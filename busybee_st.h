@@ -77,6 +77,7 @@ class busybee_st
         // SUCCESS)---you can assert it.  This will *not* clear an event on
         // poll_fd.
         busybee_returncode recv_no_msg(uint64_t* server_id);
+        void reset();
 
     private:
         class channel;
