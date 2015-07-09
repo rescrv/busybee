@@ -58,6 +58,7 @@ class busybee_st
     public:
         void set_id(uint64_t server_id);
         void set_timeout(int timeout);
+        int timeout() const { return m_timeout; }
         void set_ignore_signals();
         void unset_ignore_signals();
         void add_signals();
