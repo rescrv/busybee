@@ -49,6 +49,9 @@
 #include <sys/event.h>
 #endif
 
+// STL
+#include <stdexcept>
+
 // po6
 #include <po6/net/socket.h>
 #include <po6/threads/mutex.h>
@@ -294,21 +297,8 @@ CLASSNAME :: channel :: reset(size_t channels_sz)
 
     if (soc.get() >= 0)
     {
-        try
-        {
-            soc.shutdown(SHUT_RDWR);
-        }
-        catch (po6::error& e)
-        {
-        }
-
-        try
-        {
-            soc.close();
-        }
-        catch (po6::error& e)
-        {
-        }
+        PO6_EXPLICITLY_IGNORE(soc.shutdown(SHUT_RDWR));
+        soc.close();
     }
 
     recv_partial_header_sz = 0;
@@ -336,7 +326,7 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
                            uint64_t server_id,
                            size_t num_threads)
     : m_epoll(EPOLL_CREATE(64))
-    , m_listen(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP)
+    , m_listen()
     , m_channels_sz(sysconf(_SC_OPEN_MAX))
     , m_channels(new channel[m_channels_sz])
     , m_gc(gc)
@@ -362,6 +352,11 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
     , m_pause_paused(0)
     , m_pause_num(0)
 {
+    if (!m_listen.reset(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP))
+    {
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
+    }
+
     assert(m_server_id == 0 || m_server_id >= (1ULL << 32ULL));
     po6::threads::mutex::hold holdr(&m_recv_lock);
     po6::threads::mutex::hold holdp(&m_pause_lock);
@@ -369,7 +364,7 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
 
     if (m_epoll.get() < 0)
     {
-        throw po6::error(errno);
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
     }
 
     add_signals();
@@ -378,7 +373,7 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
 
     if (pipe(eventfd) < 0)
     {
-        throw po6::error(errno);
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
     }
 
     m_eventfdread = eventfd[0];
@@ -386,17 +381,16 @@ busybee_mta :: busybee_mta(e::garbage_collector* gc,
 
     if (add_event(m_eventfdread.get(),EPOLLIN) < 0)
     {
-        throw po6::error(errno);
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
     }
 
-    m_listen.set_reuseaddr();
-    m_listen.bind(bind_to);
-    m_listen.listen(m_channels_sz);
-    m_listen.set_nonblocking();
-
-    if (add_event(m_listen.get(), EPOLLIN) < 0)
+    if (!m_listen.set_reuseaddr() ||
+        !m_listen.bind(bind_to) ||
+        !m_listen.listen(m_channels_sz) ||
+        !m_listen.set_nonblocking() ||
+        add_event(m_listen.get(), EPOLLIN) < 0)
     {
-        throw po6::error(errno);
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
     }
 
     for (size_t i = 0; i < m_channels_sz; ++i)
@@ -431,19 +425,19 @@ busybee_st :: busybee_st(busybee_mapper* mapper,
 
     if (m_epoll.get() < 0)
     {
-        throw po6::error(errno);
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
     }
 
     add_signals();
 
     if (!m_flagfd.valid())
     {
-        throw po6::error(m_flagfd.error());
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(m_flagfd.error()));
     }
 
     if (add_event(m_flagfd.poll_fd(), EPOLLIN) < 0)
     {
-        throw po6::error(errno);
+        throw std::runtime_error("could not initialize busybee: " + po6::strerror(errno));
     }
 
     for (size_t i = 0; i < m_channels_sz; ++i)
@@ -618,14 +612,12 @@ CLASSNAME :: get_addr(uint64_t server_id, po6::net::location* addr)
     po6::threads::mutex::hold hold(&chan->mtx);
 #endif
 
-    try
+    if (chan->soc.getpeername(addr))
     {
-        *addr = chan->soc.getpeername();
         return BUSYBEE_SUCCESS;
     }
-    catch (po6::error& e)
+    else
     {
-        errno = e;
         return BUSYBEE_DISRUPTED;
     }
 }
@@ -890,7 +882,7 @@ CLASSNAME :: recv(
             if ((events & EPOLLIN))
             {
                 char buf;
-                m_eventfdread.read(&buf, 1);
+                PO6_EXPLICITLY_IGNORE(m_eventfdread.read(&buf, 1));
                 need_to_pause = true;
             }
 
@@ -1098,65 +1090,41 @@ CLASSNAME :: get_channel(uint64_t server_id, channel** _chan, uint64_t* _chan_ta
         return BUSYBEE_SUCCESS;
     }
 
-    bool cleanup_needed = false;
     *_chan = NULL;
     *_chan_tag = UINT64_MAX;
+    po6::net::location dst;
 
-    try
+    if (!m_mapper->lookup(server_id, &dst))
     {
-        po6::net::location dst;
-
-        if (!m_mapper->lookup(server_id, &dst))
-        {
-            return BUSYBEE_DISRUPTED;
-        }
-
-        po6::net::socket soc(dst.address.family(), SOCK_STREAM, IPPROTO_TCP);
-        soc.set_nonblocking();
-
-        try
-        {
-            // Wouldn't it be great to refactor and get rid of exceptions?  Yes,
-            // but not worth the cost now.
-            soc.connect(dst);
-        }
-        catch (po6::error& e)
-        {
-            if (e != EINPROGRESS)
-            {
-                throw e;
-            }
-        }
-
-        *_chan = &m_channels[soc.get()];
-        (*_chan)->lock();
-        assert((*_chan)->state == channel::NOTCONNECTED);
-        cleanup_needed = true;
-        busybee_returncode rc = setup_channel(&soc, *_chan);
-
-        if (rc != BUSYBEE_SUCCESS)
-        {
-            (*_chan)->reset(m_channels_sz);
-            (*_chan)->unlock();
-            return rc;
-        }
-
-        (*_chan)->id = server_id;
-        m_server2channel.put_ine(server_id, (*_chan)->tag);
-        // at this point, the channel is fully setup
-        *_chan_tag = (*_chan)->tag;
-        return possibly_work_send_or_recv(*_chan);
-    }
-    catch (po6::error& e)
-    {
-        if (cleanup_needed)
-        {
-            (*_chan)->reset(m_channels_sz);
-            (*_chan)->unlock();
-        }
-
         return BUSYBEE_DISRUPTED;
     }
+
+    po6::net::socket soc;
+
+    if (!soc.reset(dst.address.family(), SOCK_STREAM, IPPROTO_TCP) ||
+        !soc.set_nonblocking() ||
+        (!soc.connect(dst) && errno != EINPROGRESS))
+    {
+        return BUSYBEE_DISRUPTED;
+    }
+
+    *_chan = &m_channels[soc.get()];
+    (*_chan)->lock();
+    assert((*_chan)->state == channel::NOTCONNECTED);
+    busybee_returncode rc = setup_channel(&soc, *_chan);
+
+    if (rc != BUSYBEE_SUCCESS)
+    {
+        (*_chan)->reset(m_channels_sz);
+        (*_chan)->unlock();
+        return rc;
+    }
+
+    (*_chan)->id = server_id;
+    m_server2channel.put_ine(server_id, (*_chan)->tag);
+    // at this point, the channel is fully setup
+    *_chan_tag = (*_chan)->tag;
+    return possibly_work_send_or_recv(*_chan);
 }
 
 busybee_returncode
@@ -1165,10 +1133,19 @@ CLASSNAME :: setup_channel(po6::net::socket* soc, channel* chan)
     chan->soc.swap(soc);
 #ifdef HAVE_SO_NOSIGPIPE
     int sigpipeopt = 1;
-    chan->soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt));
+
+    if (!chan->soc.set_sockopt(SOL_SOCKET, SO_NOSIGPIPE, &sigpipeopt, sizeof(sigpipeopt)))
+    {
+        return BUSYBEE_DISRUPTED;
+    }
 #endif // HAVE_SO_NOSIGPIPE
-    chan->soc.set_tcp_nodelay();
-    chan->soc.set_nonblocking();
+
+    if (!chan->soc.set_tcp_nodelay() ||
+        !chan->soc.set_nonblocking())
+    {
+        return BUSYBEE_DISRUPTED;
+    }
+
     chan->state = channel::CONNECTED;
 
     if (add_event(chan->soc.get(),EPOLLIN|EPOLLOUT|EPOLLET) < 0)
@@ -1255,45 +1232,26 @@ CLASSNAME :: work_dispatch(channel* chan, uint32_t events, busybee_returncode* r
 void
 CLASSNAME :: work_accept()
 {
-    bool cleanup_needed = false;
-    channel* chan = NULL;
+    po6::net::socket soc;
 
-    try
+    if (!m_listen.accept(&soc) || soc.get() < 0)
     {
-        po6::net::socket soc;
-        m_listen.accept(&soc);
-
-        if (soc.get() < 0)
-        {
-            return;
-        }
-
-        chan = &m_channels[soc.get()];
-        chan->lock();
-        assert(chan->state == channel::NOTCONNECTED);
-        cleanup_needed = true;
-        busybee_returncode rc = setup_channel(&soc, chan);
-
-        if (rc != BUSYBEE_SUCCESS)
-        {
-            chan->reset(m_channels_sz);
-            chan->unlock();
-            cleanup_needed = false;
-            return;
-        }
-
-        // at this point, the channel is fully setup
-        cleanup_needed = false;
-        possibly_work_send_or_recv(chan);
+        return;
     }
-    catch (po6::error &e)
+
+    channel* chan = &m_channels[soc.get()];
+    chan->lock();
+    assert(chan->state == channel::NOTCONNECTED);
+    busybee_returncode rc = setup_channel(&soc, chan);
+
+    if (rc != BUSYBEE_SUCCESS)
     {
-        if (cleanup_needed)
-        {
-            chan->reset(m_channels_sz);
-            chan->unlock();
-        }
+        chan->reset(m_channels_sz);
+        chan->unlock();
+        return;
     }
+
+    possibly_work_send_or_recv(chan);
 }
 #endif // BUSYBEE_ACCEPT
 

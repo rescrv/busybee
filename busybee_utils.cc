@@ -25,20 +25,19 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+// C
+#include <string.h>
+
 // POSIX
-#ifndef _MSC_VER
-#ifdef __FreeBSD__
 #include <sys/types.h>
-#endif
 #include <ifaddrs.h>
-#endif
 
 // po6
 #include <po6/net/location.h>
+#include <po6/time.h>
 
 // e
 #include <e/guard.h>
-#include <e/time.h>
 
 // BusyBee
 #include "busybee_utils.h"
@@ -46,7 +45,6 @@
 bool
 busybee_discover(po6::net::ipaddr* ip)
 {
-#ifndef _MSC_VER
     struct ifaddrs* ifa = NULL;
 
     if (getifaddrs(&ifa) < 0 || !ifa)
@@ -79,7 +77,6 @@ busybee_discover(po6::net::ipaddr* ip)
     }
 
     errno = 0;
-#endif
     return false;
 }
 
@@ -88,5 +85,5 @@ busybee_generate_id()
 {
     uint64_t x = 1;
     x <<= 32;
-    return x | e::time(); // XXX weak!
+    return x | po6::time(); // XXX weak!
 }

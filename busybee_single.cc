@@ -35,13 +35,10 @@
 #include <assert.h>
 
 // POSIX
-#ifndef _MSC_VER
 #include <poll.h>
-#endif
 
 // e
 #include <e/endian.h>
-#include <e/time.h>
 
 // BusyBee
 #include "busybee_single.h"
@@ -85,11 +82,7 @@ busybee_single :: set_timeout(int timeout)
 }
 
 busybee_returncode
-#ifdef _MSC_VER
-busybee_single :: send(std::shared_ptr<e::buffer> msg)
-#else
 busybee_single :: send(std::auto_ptr<e::buffer> msg)
-#endif
 {
     // Pack the size into the header
     msg->pack() << static_cast<uint32_t>(msg->size());
@@ -98,13 +91,16 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
     {
         if (m_type == USE_HOSTNAME)
         {
-            m_remote = m_host.connect(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &m_connection);
+            m_remote = m_host.connect(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &m_connection); // XXX
         }
         else if (m_type == USE_LOCATION)
         {
-            m_connection.reset(m_loc.address.family(), SOCK_STREAM, IPPROTO_TCP);
-            m_connection.connect(m_loc);
-            m_remote = m_connection.getpeername();
+            if (!m_connection.reset(m_loc.address.family(), SOCK_STREAM, IPPROTO_TCP) ||
+                !m_connection.connect(m_loc) ||
+                !m_connection.getpeername(&m_remote))
+            {
+                return BUSYBEE_DISRUPTED;
+            }
         }
         else
         {
@@ -139,11 +135,7 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
 }
 
 busybee_returncode
-#ifdef _MSC_VER
-busybee_single :: recv(std::shared_ptr<e::buffer>* msg)
-#else
 busybee_single :: recv(std::auto_ptr<e::buffer>* msg)
-#endif
 {
     while (true)
     {
@@ -171,11 +163,7 @@ busybee_single :: recv(std::auto_ptr<e::buffer>* msg)
         pfd.fd = m_connection.get();
         pfd.events = POLLIN;
         pfd.revents = 0;
-#ifdef _MSC_VER
-        int status = WSAPoll(&pfd, 1, m_timeout);
-#else
         int status = poll(&pfd, 1, m_timeout);
-#endif
 
         if (status < 0 && EINTR)
         {
@@ -273,21 +261,8 @@ busybee_single :: recv(std::auto_ptr<e::buffer>* msg)
 void
 busybee_single :: reset()
 {
-    try
-    {
-        m_connection.shutdown(SHUT_RDWR);
-    }
-    catch (po6::error& e)
-    {
-    }
-
-    try
-    {
-        m_connection.close();
-    }
-    catch (po6::error& e)
-    {
-    }
+    PO6_EXPLICITLY_IGNORE(m_connection.shutdown(SHUT_RDWR));
+    m_connection.close();
 
     m_remote = po6::net::location();
     m_recv_partial_header_sz = 0;
