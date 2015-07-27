@@ -585,7 +585,7 @@ busybee_st :: set_external_fd(int fd)
 
     assert(chan->state == channel::NOTCONNECTED);
 
-    if (add_event(fd, EPOLLIN) < 0 && errno != EEXIST)
+    if (add_event(fd, EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP) < 0 && errno != EEXIST)
     {
         return BUSYBEE_POLLFAILED;
     }
