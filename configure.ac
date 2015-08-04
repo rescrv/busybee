@@ -38,7 +38,7 @@ AC_EGREP_HEADER([SO_NOSIGPIPE],[sys/socket.h],AC_DEFINE([HAVE_SO_NOSIGPIPE],[1],
 
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
-AC_CHECK_FUNCS([memmove socket epoll_ctl kqueue clock_gettime mach_absolute_time])
+AC_CHECK_FUNCS([memmove socket epoll_ctl kqueue])
 
 AC_CONFIG_FILES([Makefile
                  busybee.pc
