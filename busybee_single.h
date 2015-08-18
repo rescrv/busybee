@@ -51,9 +51,10 @@ class busybee_single
         void set_timeout(int timeout);
 
     public:
-        // This is valid so long as send has been called, and the most recent
+        // These are valid so long as send has been called, and the most recent
         // call to send or recv returned SUCCESS
         const po6::net::location& remote() { return m_remote; }
+        int poll_fd() { return m_connection.get(); }
         // This is valid so long as recv has been called, and the most recent call
         // to send or recv returned SUCCESS
         uint64_t token() { return m_token; }
