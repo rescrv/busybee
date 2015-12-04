@@ -65,6 +65,8 @@
 #include "busybee_constants.h"
 #include "busybee_utils.h"
 
+#pragma GCC diagnostic ignored "-Wunsafe-loop-optimizations"
+
 // BusyBee Feature Declaration
 #ifdef BUSYBEE_MTA
 #ifdef BUSYBEE_TYPE

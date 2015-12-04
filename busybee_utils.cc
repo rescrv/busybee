@@ -64,15 +64,23 @@ busybee_discover(po6::net::ipaddr* ip)
 
         if (ifap->ifa_addr->sa_family == AF_INET)
         {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in));
-            *ip = loc.address;
-            return true;
+            po6::net::location loc;
+
+            if (loc.set(ifap->ifa_addr, sizeof(sockaddr_in)))
+            {
+                *ip = loc.address;
+                return true;
+            }
         }
         else if (ifap->ifa_addr->sa_family == AF_INET6)
         {
-            po6::net::location loc(ifap->ifa_addr, sizeof(sockaddr_in6));
-            *ip = loc.address;
-            return true;
+            po6::net::location loc;
+
+            if (loc.set(ifap->ifa_addr, sizeof(sockaddr_in6)))
+            {
+                *ip = loc.address;
+                return true;
+            }
         }
     }
 
