@@ -235,6 +235,8 @@ class HIDDEN CLASSNAME::channel
         char recv_partial_header[sizeof(uint32_t)];
         std::auto_ptr<e::buffer> recv_partial_msg;
         uint32_t recv_flags;
+        recv_message* recv_queue;
+        recv_message** recv_end;
         // send state
         send_message* send_queue; // must hold mtx
         send_message** send_end; // must hold mtx
@@ -260,6 +262,8 @@ CLASSNAME :: channel :: channel()
     , recv_partial_header_sz(0)
     , recv_partial_msg()
     , recv_flags(0)
+    , recv_queue(NULL)
+    , recv_end(&recv_queue)
     , send_queue(NULL)
     , send_end(&send_queue)
     , send_ptr(NULL)
@@ -268,6 +272,12 @@ CLASSNAME :: channel :: channel()
 
 CLASSNAME :: channel :: ~channel() throw ()
 {
+    while (recv_queue)
+    {
+        recv_message* m = recv_queue;
+        recv_queue = recv_queue->next;
+        delete m;
+    }
 }
 
 void
@@ -464,6 +474,15 @@ CLASSNAME :: ~CLASSNAME() throw ()
         m_recv_queue = m_recv_queue->next;
         delete m;
     }
+
+#ifdef BUSYBEE_MULTITHREADED
+    while (m_recv_queue_setaside)
+    {
+        recv_message* m = m_recv_queue_setaside;
+        m_recv_queue_setaside = m_recv_queue_setaside->next;
+        delete m;
+    }
+#endif // BUSYBEE_MULTITHREADED
 
 #ifdef BUSYBEE_SINGLETHREADED
     m_gc.deregister_thread(&m_gc_ts);
@@ -1404,9 +1423,6 @@ CLASSNAME :: work_send(channel* chan, busybee_returncode* rc)
 bool
 CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
 {
-    recv_message* recv_queue = NULL;
-    recv_message** recv_end = &recv_queue;
-
     while (true)
     {
         uint8_t buf[IO_BLOCKSIZE];
@@ -1447,13 +1463,15 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
             chan->recver_has_it = false;
             chan->unlock();
 
-            if (recv_queue)
+            if (chan->recv_queue)
             {
 #ifdef BUSYBEE_MULTITHREADED
                 po6::threads::mutex::hold hold(&m_recv_lock);
 #endif // BUSYBEE_MULTITHREADED
-                *m_recv_end = recv_queue;
-                m_recv_end = recv_end;
+                *m_recv_end = chan->recv_queue;
+                m_recv_end = chan->recv_end;
+                chan->recv_queue = NULL;
+                chan->recv_end = &chan->recv_queue;
 
 #ifdef BUSYBEE_SINGLETHREADED
                 m_flagfd.set();
@@ -1527,8 +1545,8 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
                     else
                     {
                         recv_message* tmp = new recv_message(NULL, chan->id, chan->recv_partial_msg);
-                        *recv_end = tmp;
-                        recv_end = &tmp->next;
+                        *chan->recv_end = tmp;
+                        chan->recv_end = &tmp->next;
                     }
 
                     // clear state
