@@ -91,7 +91,12 @@ busybee_single :: send(std::auto_ptr<e::buffer> msg)
     {
         if (m_type == USE_HOSTNAME)
         {
-            m_remote = m_host.connect(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &m_connection); // XXX
+            m_remote = m_host.connect(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &m_connection);
+
+            if (m_connection.get() < 0)
+            {
+                return BUSYBEE_DISRUPTED;
+            }
         }
         else if (m_type == USE_LOCATION)
         {

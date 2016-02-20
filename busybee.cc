@@ -1092,6 +1092,7 @@ void
 CLASSNAME :: up_the_semaphore()
 {
     char buf[32];
+    memset(buf, 0, sizeof(buf));
 
     for (size_t i = 0; i < m_pause_count; i += 32)
     {
