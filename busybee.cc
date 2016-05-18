@@ -608,6 +608,7 @@ busybee_st :: set_external_fd(int fd)
 
     if (add_event(fd, EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP) < 0 && errno != EEXIST)
     {
+        chan->unlock();
         return BUSYBEE_POLLFAILED;
     }
 
