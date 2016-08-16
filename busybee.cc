@@ -685,7 +685,6 @@ CLASSNAME :: drop(uint64_t server_id)
     chan->state = channel::CRASHING;
     busybee_returncode rc;
     work_close(chan, &rc);
-    chan->unlock();
     return BUSYBEE_SUCCESS;
 }
 
@@ -718,7 +717,15 @@ CLASSNAME :: send(uint64_t server_id,
             chan->state < channel::CONNECTED ||
             chan->state > channel::IDENTIFIED)
         {
-            chan->unlock();
+            if (chan->state == channel::CRASHING)
+            {
+                work_close(chan, &rc);
+            }
+            else
+            {
+                chan->unlock();
+            }
+
             continue;
         }
 
@@ -1278,6 +1285,7 @@ CLASSNAME :: work_accept()
 }
 #endif // BUSYBEE_ACCEPT
 
+// work_close guarantees chan->unlock()
 bool
 CLASSNAME :: work_close(channel* chan, busybee_returncode* rc)
 {
