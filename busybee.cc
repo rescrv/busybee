@@ -857,13 +857,12 @@ CLASSNAME :: recv(
 #endif // BUSYBEE_SINGLETHREADED
             }
 
-#ifdef BUSYBEE_SINGLETHREADED
-            m_gc.quiescent_state(&m_gc_ts);
-#endif // BUSYBEE_SINGLETHREADED
-
 #ifdef BUSYBEE_MULTITHREADED
             m_recv_lock.unlock();
 #endif // BUSYBEE_MULTITHREADED
+#ifdef BUSYBEE_SINGLETHREADED
+            m_gc.quiescent_state(&m_gc_ts);
+#endif // BUSYBEE_SINGLETHREADED
             *id = m->id;
             *msg = m->msg;
             delete m;
@@ -1471,7 +1470,6 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
             }
 
             chan->recver_has_it = false;
-            chan->unlock();
 
             if (chan->recv_queue)
             {
@@ -1488,6 +1486,7 @@ CLASSNAME :: work_recv(channel* chan, busybee_returncode* rc)
 #endif // BUSYBEE_SINGLETHREADED
             }
 
+            chan->unlock();
             return true;
         }
         else if (rem == 0)
