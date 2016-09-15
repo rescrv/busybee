@@ -41,7 +41,6 @@
 // Linux
 #ifdef HAVE_EPOLL_CTL
 #include <sys/epoll.h>
-#include <sys/eventfd.h>
 #endif
 
 // BSD / OS X
