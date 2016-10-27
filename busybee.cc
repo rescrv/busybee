@@ -52,6 +52,7 @@
 #include <stdexcept>
 
 // po6
+#include <po6/errno.h>
 #include <po6/net/socket.h>
 #include <po6/threads/mutex.h>
 
@@ -502,7 +503,7 @@ CLASSNAME :: add_signals()
 
     if(kevent(m_epoll.get(), ee, 5, NULL, 0, NULL) < 0)
     {
-        throw po6::error(errno);
+        // XXX throw po6::error(errno);
     }
 #endif
 }
