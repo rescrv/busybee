@@ -3,13 +3,14 @@
 
 AC_PREREQ([2.66])
 AC_INIT([BusyBee], [0.7.dev], [robert@hyperdex.org])
+AC_CONFIG_AUX_DIR([.])
+AC_CONFIG_SRCDIR([busybee.cc])
+AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign subdir-objects dist-bzip2])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 LT_PREREQ([2.2])
 LT_INIT
-AC_CONFIG_SRCDIR([busybee.cc])
-AC_CONFIG_HEADERS([config.h])
-AC_CONFIG_MACRO_DIR([m4])
 
 # Checks for programs.
 AC_PROG_CXX
