@@ -384,7 +384,7 @@ channel :: channel()
     queue_init(&m_send_queue, &m_send_end);
 }
 
-channel :: ~channel()
+channel :: ~channel() throw ()
 {
     DEBUG("channel " << (void*)this << " destroyed");
     po6::threads::mutex::hold m_hold(&m_send_mtx);
@@ -1147,7 +1147,7 @@ server :: server(busybee_controller* controller,
     queue_init(&m_recv_queue, &m_recv_end);
 }
 
-server :: ~server()
+server :: ~server() throw ()
 {
     po6::threads::mutex::hold hold(&m_recv_mtx);
     queue_cleanup(m_recv_queue, m_recv_end);
