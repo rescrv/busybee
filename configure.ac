@@ -29,6 +29,14 @@ PKG_CHECK_MODULES([E], [libe >= 0.11])
 # Checks for header files.
 AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h sys/socket.h unistd.h])
 
+AC_CHECK_HEADER([popt.h],,[AC_MSG_ERROR([
+-------------------------------------------------
+Consus relies upon the popt library.
+Please install popt to continue.
+-------------------------------------------------])])
+AC_ARG_VAR(POPT_LIBS, [linker flags for popt])
+AS_IF([test "x$POPT_LIBS" = x], [POPT_LIBS="-lpopt"])
+
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
 AC_C_INLINE
@@ -45,6 +53,5 @@ AC_FUNC_ERROR_AT_LINE
 AC_CHECK_FUNCS([memmove socket epoll_ctl kqueue])
 
 AC_CONFIG_FILES([Makefile
-                 busybee.pc
-                 busybee.upack])
+                 busybee.pc])
 AC_OUTPUT

@@ -1,4 +1,5 @@
-## Copyright (c) 2012, Cornell University
+## Copyright (c) 2012-2016, Cornell University
+## Copyright (c) 2017, Robert Escriva, Cornell University
 ## All rights reserved.
 ##
 ## Redistribution and use in source and binary forms, with or without
@@ -27,20 +28,33 @@
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
 
-AM_CPPFLAGS = $(E_CFLAGS) $(PO6_CFLAGS)
-AM_CFLAGS = $(WANAL_CFLAGS)
-AM_CXXFLAGS = $(E_CFLAGS) $(PO6_CFLAGS) $(WANAL_CXXFLAGS)
+AM_CPPFLAGS  = -I${abs_top_srcdir}/include $(PO6_CFLAGS) $(E_CFLAGS)
+AM_CFLAGS    = $(WANAL_CFLAGS)
+AM_CXXFLAGS  = $(PO6_CFLAGS) $(E_CFLAGS) $(WANAL_CXXFLAGS)
 if MAKE_NO_PRINT_DIRECTORY
 AM_MAKEFLAGS = --no-print-directory
 endif
 
-EXTRA_DIST = LICENSE busybee.cc
+EXTRA_DIST = LICENSE
 
-noinst_PROGRAMS =
-include_HEADERS = busybee_constants.h busybee_mapper.h busybee_returncode.h busybee_utils.h busybee_mta.h busybee_st.h busybee_single.h
+include_HEADERS = include/busybee.h
+
 lib_LTLIBRARIES = libbusybee.la
-libbusybee_la_SOURCES = busybee_mta.cc busybee_st.cc busybee_mapper.cc busybee_returncode.cc busybee_single.cc busybee_utils.cc
-libbusybee_la_LIBADD = $(E_LIBS)
-libbusybee_la_LDFLAGS =  -version-info 3:0:0
+
+libbusybee_la_SOURCES = busybee.cc
+libbusybee_la_SOURCES += epoll_poller.cc
+libbusybee_la_LIBADD = $(E_LIBS) $(PO6_LIBS)
+libbusybee_la_LDFLAGS = -version-info 3:0:0
+
+check_PROGRAMS =
+check_PROGRAMS += test/bouncing-server
+check_PROGRAMS += test/bouncing-client
+
+test_bouncing_server_SOURCES = test/bouncing-server.cc
+test_bouncing_server_LDADD = libbusybee.la $(POPT_LIBS)
+
+test_bouncing_client_SOURCES = test/bouncing-client.cc
+test_bouncing_client_LDADD = libbusybee.la $(POPT_LIBS)
+
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = busybee.pc

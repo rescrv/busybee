@@ -17,6 +17,7 @@
 /config.guess
 /config.h
 /config.h.in
+/config.h.in~
 /config.log
 /config.status
 /config.sub
@@ -31,3 +32,5 @@
 /Makefile.in
 /missing
 /stamp-h1
+/test/bouncing-client
+/test/bouncing-server
