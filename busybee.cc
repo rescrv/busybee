@@ -35,8 +35,8 @@
 #include <poll.h>
 #include <sys/types.h>
 
-// STL
-#include <unordered_map>
+// Google SparseHash
+#include <google/dense_hash_map>
 
 // po6
 #include <po6/threads/mutex.h>
@@ -252,7 +252,7 @@ class client : public busybee_client
         poller* m_poll;
         channel** m_channels;
         size_t m_channels_sz;
-        std::unordered_map<uint64_t, channel*> m_server2channel;
+        google::dense_hash_map<uint64_t, channel*> m_server2channel;
         message* m_recv_queue;
         message** m_recv_end;
 
@@ -1712,7 +1712,7 @@ client :: reset()
 channel*
 client :: get_channel(uint64_t server_id, busybee_returncode* rc)
 {
-    std::unordered_map<uint64_t, channel*>::iterator it;
+    google::dense_hash_map<uint64_t, channel*>::iterator it;
     it = m_server2channel.find(server_id);
 
     if (it != m_server2channel.end())
@@ -1834,7 +1834,7 @@ client :: work_close(channel* chan)
     DEBUG("client closing channel " << (void*)chan);
     assert(m_channels[chan->fd()] == chan);
     m_channels[chan->fd()] = NULL;
-    std::unordered_map<uint64_t, channel*>::iterator it;
+    google::dense_hash_map<uint64_t, channel*>::iterator it;
     it = m_server2channel.find(chan->remote());
 
     if (it->second == chan)

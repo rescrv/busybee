@@ -29,6 +29,12 @@ PKG_CHECK_MODULES([E], [libe >= 0.11])
 # Checks for header files.
 AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h sys/socket.h unistd.h])
 
+AC_CHECK_HEADER([google/dense_hash_map],,[AC_MSG_ERROR([
+-------------------------------------------------
+Replicant relies upon the sparsehash library.
+Please install sparsehash to continue.
+-------------------------------------------------])])
+
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
 AC_C_INLINE
