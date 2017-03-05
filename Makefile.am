@@ -38,7 +38,7 @@ endif
 EXTRA_DIST = LICENSE
 
 include_HEADERS = include/busybee.h
-noinst_HEADERS = busybee-internal.h test/bouncing-common.h
+noinst_HEADERS = busybee-internal.h
 
 lib_LTLIBRARIES = libbusybee.la
 
@@ -46,16 +46,6 @@ libbusybee_la_SOURCES = busybee.cc
 libbusybee_la_SOURCES += epoll_poller.cc
 libbusybee_la_LIBADD = $(E_LIBS) $(PO6_LIBS)
 libbusybee_la_LDFLAGS = -version-info 3:0:0
-
-check_PROGRAMS =
-check_PROGRAMS += test/bouncing-server
-check_PROGRAMS += test/bouncing-client
-
-test_bouncing_server_SOURCES = test/bouncing-server.cc
-test_bouncing_server_LDADD = libbusybee.la $(POPT_LIBS)
-
-test_bouncing_client_SOURCES = test/bouncing-client.cc
-test_bouncing_client_LDADD = libbusybee.la $(POPT_LIBS)
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = busybee.pc
