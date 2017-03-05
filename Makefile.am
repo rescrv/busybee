@@ -38,6 +38,7 @@ endif
 EXTRA_DIST = LICENSE
 
 include_HEADERS = include/busybee.h
+noinst_HEADERS = busybee-internal.h test/bouncing-common.h
 
 lib_LTLIBRARIES = libbusybee.la
 
