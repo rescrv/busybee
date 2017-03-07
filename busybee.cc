@@ -409,6 +409,11 @@ channel :: connect(uint64_t local, uint64_t remote, const po6::net::location& wh
         return BUSYBEE_DISRUPTED;
     }
 
+#ifdef BUSYBEE_DEBUG
+    po6::net::location loc;
+    (void) m_sock.getsockname(&loc);
+#endif // BUSYBEE_DEBUG
+    DEBUG("channel " << (void*)this << " local address is " << loc);
     enqueue_identify();
     return setup();
 }
@@ -783,7 +788,7 @@ channel :: do_work_close()
         }
         else if (flags == witnessed)
         {
-            shutdown(m_sock.get(), SHUT_RDWR);
+            shutdown(m_sock.get(), SHUT_WR);
             // this execution transitioned from CLOSE_NEEDED to CLOSED
             return (busybee_returncode)INTERNAL_TIME_TO_CLOSE;
         }
@@ -802,12 +807,14 @@ channel :: do_work_close()
 void
 channel :: work_send()
 {
+    DEBUG("channel " << (void*)this << " entering work_send");
     m_send_mtx.lock();
 
     while (m_send_queue)
     {
         e::buffer* payload = m_send_queue->payload;
         m_send_mtx.unlock();
+        DEBUG("channel " << (void*)this << " work_send top of loop");
 
         if (!m_send_ptr)
         {
@@ -824,20 +831,24 @@ channel :: work_send()
             errno != EAGAIN &&
             errno != EWOULDBLOCK)
         {
+            DEBUG("channel " << (void*)this << " work_send error out " << po6::strerror(errno));
             e::atomic::or_64_nobarrier(&m_flags, CHAN_CLOSE_NEEDED);
             return;
         }
         else if (ret < 0 && errno == EINTR)
         {
+            DEBUG("channel " << (void*)this << " work_send interrupted");
             continue;
         }
         else if (ret < 0) // EAGAIN/EWOULDBLOCK
         {
+            DEBUG("channel " << (void*)this << " work_send would block");
             // edge is clear here
             return;
         }
         else if (ret == 0)
         {
+            DEBUG("channel " << (void*)this << " work_send sent 0");
             e::atomic::or_64_nobarrier(&m_flags, CHAN_CLOSE_NEEDED);
             return;
         }
@@ -847,6 +858,7 @@ channel :: work_send()
         if (m_send_ptr >= payload->data() + payload->size())
         {
             m_send_mtx.lock();
+            DEBUG("channel " << (void*)this << " work_send finished sending one message");
             message* head = m_send_queue;
             queue_remove_head(&m_send_queue, &m_send_end);
             m_send_mtx.unlock();
@@ -867,8 +879,11 @@ channel :: work_send()
 void
 channel :: work_recv(message*** recv_end)
 {
+    DEBUG("channel " << (void*)this << " entering work_recv");
+
     while (true)
     {
+        DEBUG("channel " << (void*)this << " work_recv top of loop");
         uint8_t buf[IO_BLOCKSIZE];
 
         if (m_recv_partial_header_sz)
@@ -884,19 +899,23 @@ channel :: work_recv(message*** recv_end)
             errno != EAGAIN &&
             errno != EWOULDBLOCK)
         {
+            DEBUG("channel " << (void*)this << " work_recv error out " << po6::strerror(errno));
             e::atomic::or_64_nobarrier(&m_flags, CHAN_CLOSE_NEEDED);
             return;
         }
         else if (ret < 0 && errno == EINTR)
         {
+            DEBUG("channel " << (void*)this << " work_recv interrupted");
             continue;
         }
         else if (ret < 0) // EAGAIN/EWOULDBLOCK
         {
+            DEBUG("channel " << (void*)this << " work_recv would block");
             return;
         }
         else if (ret == 0)
         {
+            DEBUG("channel " << (void*)this << " work_recv recv 0");
             e::atomic::or_64_nobarrier(&m_flags, CHAN_CLOSE_NEEDED);
             return;
         }
@@ -1143,12 +1162,14 @@ server :: server(busybee_controller* controller,
     , m_recv_end(NULL)
     , m_recv_flag()
 {
+    DEBUG("creating server " << (void*)this);
     po6::threads::mutex::hold hold(&m_recv_mtx);
     queue_init(&m_recv_queue, &m_recv_end);
 }
 
 server :: ~server() throw ()
 {
+    DEBUG("destroying server " << (void*)this);
     po6::threads::mutex::hold hold(&m_recv_mtx);
     queue_cleanup(m_recv_queue, m_recv_end);
     m_gc->collect(m_poll, e::garbage_collector::free_ptr<poller>);
@@ -1181,6 +1202,7 @@ server :: init()
         return rc;
     }
 
+    m_channels_sz = sysconf(_SC_OPEN_MAX);
     const po6::net::location bind_to(m_bind_to);
 
     if (!m_listen.reset(bind_to.address.family(), SOCK_STREAM, IPPROTO_TCP) ||
@@ -1194,7 +1216,6 @@ server :: init()
         return BUSYBEE_SEE_ERRNO;
     }
 
-    m_channels_sz = sysconf(_SC_OPEN_MAX);
     m_channels = new (std::nothrow) channel*[m_channels_sz];
 
     if (!m_channels)
@@ -1364,6 +1385,13 @@ server :: get_channel(uint64_t server_id, busybee_returncode* rc)
     }
 
     po6::net::location remote = m_controller->lookup(server_id);
+
+    if (remote == po6::net::location())
+    {
+        *rc = BUSYBEE_DISRUPTED;
+        return NULL;
+    }
+
     chan = new channel();
     *rc = chan->connect(m_server_id, server_id, remote);
 
@@ -1548,11 +1576,15 @@ client :: client(busybee_controller* controller)
     , m_recv_queue(NULL)
     , m_recv_end(NULL)
 {
+    DEBUG("creating client " << (void*)this);
+    m_server2channel.set_empty_key(BUSYBEE_CHOSEN_ID_MINIMUM - 1);
+    m_server2channel.set_deleted_key(BUSYBEE_CHOSEN_ID_MINIMUM - 2);
     queue_init(&m_recv_queue, &m_recv_end);
 }
 
 client :: ~client() throw ()
 {
+    DEBUG("destroying client " << (void*)this);
     reset();
     delete m_poll;
     delete[] m_channels;
@@ -1688,6 +1720,7 @@ client :: set_external_fd(int fd)
 busybee_returncode
 client :: reset()
 {
+    DEBUG("resetting client " << (void*)this);
     busybee_returncode err = BUSYBEE_SUCCESS;
     busybee_returncode rc = BUSYBEE_SUCCESS;
 
@@ -1722,6 +1755,13 @@ client :: get_channel(uint64_t server_id, busybee_returncode* rc)
     }
 
     po6::net::location remote = m_controller->lookup(server_id);
+
+    if (remote == po6::net::location())
+    {
+        *rc = BUSYBEE_DISRUPTED;
+        return NULL;
+    }
+
     std::auto_ptr<channel> chan(new channel());
     *rc = chan->connect(0, server_id, remote);
 
@@ -1874,6 +1914,7 @@ single :: single(const po6::net::hostname& host)
     , m_recv_queue()
     , m_recv_end()
 {
+    DEBUG("creating single connection " << (void*)this);
     queue_init(&m_recv_queue, &m_recv_end);
 }
 
@@ -1885,11 +1926,13 @@ single :: single(const po6::net::location& host)
     , m_recv_queue()
     , m_recv_end()
 {
+    DEBUG("creating single connection " << (void*)this);
     queue_init(&m_recv_queue, &m_recv_end);
 }
 
 single :: ~single() throw ()
 {
+    DEBUG("destroying single connection " << (void*)this);
     queue_cleanup(m_recv_queue, m_recv_end);
 }
 
