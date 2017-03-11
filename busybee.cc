@@ -1267,6 +1267,7 @@ server :: recv(e::garbage_collector::thread_state* ts,
                std::auto_ptr<e::buffer>* msg)
 {
     *id = 0;
+    bool looped = false;
 
     while (true)
     {
@@ -1275,7 +1276,7 @@ server :: recv(e::garbage_collector::thread_state* ts,
             return BUSYBEE_SHUTDOWN;
         }
 
-        if (msg)
+        if (looped && msg)
         {
             m_recv_mtx.lock();
 
@@ -1307,14 +1308,21 @@ server :: recv(e::garbage_collector::thread_state* ts,
         uint32_t events;
 
         m_gc->offline(ts);
-        rc = m_poll->poll(timeout, &fd, &events);
+        rc = m_poll->poll(looped ? timeout : 0, &fd, &events);
         DEBUG("server " << (void*)this << " rc=" << rc << " poll fd=" << fd << " events=" << events);
         m_gc->online(ts);
 
-        if (rc != BUSYBEE_SUCCESS)
+        if (rc == BUSYBEE_TIMEOUT && !looped)
+        {
+            looped = true;
+            continue;
+        }
+        else if (rc != BUSYBEE_SUCCESS)
         {
             return rc;
         }
+
+        looped = true;
 
         if (fd == m_recv_flag.poll_fd())
         {
