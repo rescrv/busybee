@@ -240,6 +240,8 @@ class client : public busybee_client
         virtual int poll_fd() { return m_poll->poll_fd(); }
         virtual busybee_returncode set_external_fd(int fd);
         virtual busybee_returncode reset();
+        virtual busybee_returncode send_anonymous(const po6::net::location& loc,
+                                                  std::auto_ptr<e::buffer> msg);
 
     private:
         channel* get_channel(uint64_t server_id, busybee_returncode* rc);
@@ -1750,6 +1752,35 @@ client :: reset()
     return err;
 }
 
+busybee_returncode
+client :: send_anonymous(const po6::net::location& remote,
+                         std::auto_ptr<e::buffer> msg)
+{
+    assert(msg->size() >= BUSYBEE_HEADER_SIZE);
+    assert(msg->size() <= BUSYBEE_MAX_MSG_SIZE);
+    busybee_returncode rc;
+    std::auto_ptr<channel> chan(new channel());
+    rc = chan->connect(0, 0, remote);
+
+    if (rc != BUSYBEE_SUCCESS)
+    {
+        return rc;
+    }
+
+    rc = m_poll->add(chan->fd(), BBPOLLIN|BBPOLLOUT|BBPOLLET);
+
+    if (rc != BUSYBEE_SUCCESS)
+    {
+        return rc;
+    }
+
+    channel* c = chan.release();
+    assert(m_channels[c->fd()] == NULL || m_channels[c->fd()] == CHANNEL_EXTERNAL);
+    m_channels[c->fd()] = c;
+    c->enqueue(msg);
+    return work_send(c);
+}
+
 channel*
 client :: get_channel(uint64_t server_id, busybee_returncode* rc)
 {
@@ -1786,7 +1817,7 @@ client :: get_channel(uint64_t server_id, busybee_returncode* rc)
     }
 
     *rc = BUSYBEE_SUCCESS;
-    assert(m_channels[chan->fd()] == NULL);
+    assert(m_channels[chan->fd()] == NULL || m_channels[chan->fd()] == CHANNEL_EXTERNAL);
     m_server2channel[server_id] = chan.get();
     m_channels[chan->fd()] = chan.get();
     return chan.release();

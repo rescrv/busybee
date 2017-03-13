@@ -109,6 +109,7 @@ class busybee_server
         // The thread state may be taken offline
         virtual busybee_returncode recv_no_msg(e::garbage_collector::thread_state* ts,
                                                int timeout, uint64_t* server_id) = 0;
+
         // Return the address used for the channel
         virtual busybee_returncode get_addr(uint64_t server_id, po6::net::location* addr) = 0;
         // Shutdown the server, forcing all subsequent recv to return BUSYBEE_SHUTDOWN
@@ -143,6 +144,7 @@ class busybee_client
         // failures without taking delivery of a message a time when the message
         // could not be processed.
         virtual busybee_returncode recv_no_msg(int timeout, uint64_t* server_id) = 0;
+
         // The file descriptor to poll for activity on this busybee client
         virtual int poll_fd() = 0;
         // Set an external fd to be monitored by the internal poll
@@ -152,6 +154,11 @@ class busybee_client
         // accomplishes the same result as delete/recreate, but guarantees the
         // poll_fd stays the same.
         virtual busybee_returncode reset() = 0;
+        // Connect to a given host and enqueue a message to that host.  The
+        // connection will be anonymous, and the server_id reported by the
+        // remote server will be assumed accurate.
+        virtual busybee_returncode send_anonymous(const po6::net::location& loc,
+                                                  std::auto_ptr<e::buffer> msg) = 0;
 };
 
 class busybee_single
