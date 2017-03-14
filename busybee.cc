@@ -400,7 +400,7 @@ channel :: connect(uint64_t local, uint64_t remote, const po6::net::location& wh
     m_meta_mtx.lock();
     m_local = local;
     m_remote = remote;
-    m_id_method = CONNECT;
+    m_id_method = remote ? CONNECT : ACCEPT;
     m_meta_mtx.unlock();
 
     if (!m_sock.reset(where.address.family(), SOCK_STREAM, IPPROTO_TCP) ||
@@ -1119,6 +1119,12 @@ busybee_controller :: ~busybee_controller() throw ()
 {
 }
 
+po6::net::location
+busybee_controller :: lookup(uint64_t)
+{
+    return po6::net::location();
+}
+
 busybee_server*
 busybee_server :: create(busybee_controller* controller,
                          uint64_t server_id,
@@ -1744,6 +1750,8 @@ client :: reset()
         {
             delete m_channels[i];
         }
+
+        m_channels[i] = NULL;
     }
 
     m_server2channel.clear();
@@ -1916,7 +1924,7 @@ client :: work_close(channel* chan)
     google::dense_hash_map<uint64_t, channel*>::iterator it;
     it = m_server2channel.find(chan->remote());
 
-    if (it->second == chan)
+    if (it != m_server2channel.end() && it->second == chan)
     {
         m_server2channel.erase(it);
     }

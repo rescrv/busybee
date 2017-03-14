@@ -69,7 +69,7 @@ class busybee_controller
         virtual ~busybee_controller() throw ();
 
     public:
-        virtual po6::net::location lookup(uint64_t server_id) = 0;
+        virtual po6::net::location lookup(uint64_t server_id);
 };
 
 class busybee_server
